@@ -1,7 +1,10 @@
+#include <Windows.h>
+
 #include <fmt/core.h>
 #include <nowide/args.hpp>
 
 int main() {
-	fmt::print("Hello World!");
+	UINT acp = GetACP();
+	fmt::print("ACP {}", acp);
 	return 0;
 }
