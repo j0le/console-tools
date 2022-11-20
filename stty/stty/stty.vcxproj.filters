@@ -19,4 +19,7 @@
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
+  <ItemGroup>
+    <Xml Include="UTF8Manifest.xml" />
+  </ItemGroup>
 </Project>
