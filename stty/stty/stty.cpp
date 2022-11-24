@@ -1,8 +1,15 @@
+
 #include <Windows.h>
+
+#include <string>
+#include <optional>
+#include <cstdint>
+
+#include "helper.h"
 
 #include <fmt/core.h>
 #include <nowide/args.hpp>
-#include <string>
+
 
 //void print_bits(DWORD dw) {
 //	constexpr const int number_of_bits = sizeof(dw) * 8;
@@ -129,7 +136,7 @@ void PrintMode(std::string_view name, HANDLE hStd) {
 	}
 }
 
-int main() {
+void PrintInfo() {
 	UINT acp = GetACP();
 	UINT oem_cp = GetACP();
 	UINT console_input_cp = GetConsoleCP();
@@ -157,6 +164,66 @@ int main() {
 			fmt::print("The handles for stdout and stderr do not point to the same kernel object.{}\n",
 				hStdOut == hStdErr ? " It seems like, the object they are pointing to is not a kernel object, but some other kind of object." : "");
 	}
+}
 
-	return 0;
+void PrintUsage() {
+	fmt::print(stderr,
+		"Usage:\""
+		"\n"
+		"  stty.exe [--pid <PID>] [--handle-out <handle-out>] [--no-self-spawn] \n"
+	);
+}
+
+int main(int argc, const char **argv) {
+
+	if (argc <= 1) {
+		PrintInfo();
+		return 0;
+	}
+	if (GetACP() != 65001) {
+		fmt::print(stderr, "The Active Code Page is not UTF-8. Commandline parsing not supported.\n");
+		return 1;
+	}
+
+
+	std::optional<uint32_t> PID{ std::nullopt };
+	bool no_self_spawn{ false };
+
+	int i{ 1 };
+	std::string_view current_arg{ argv[i] };
+	while(true) {
+		std::optional<std::string_view> next_arg{ std::nullopt };
+
+		{
+			int next_index = i + 1;
+			bool next_available = next_index < argc;
+			if (next_available)
+				next_arg = argv[next_index];
+		}
+
+
+		if (current_arg == "--pid") {
+			if (!next_arg) {
+				fmt::print(stderr, "No process identifier supplied for option \"--pid\".\n");
+				PrintUsage();
+				return 1;
+			}
+
+			PID = string_to_uint32(*next_arg);
+			if (!PID) {
+				fmt::print(stderr, "Process identifier supplied for option \"--pid\" is not a number in base ten.\n");
+				PrintUsage();
+				return 1;
+			}
+		}
+		else {
+			fmt::print(stderr, "Argument {}{}{} could not be interpreted", quote_open, current_arg, quote_close);
+		}
+
+
+
+		if (!next_arg)
+			break;
+		current_arg = *next_arg;
+	}
 }
