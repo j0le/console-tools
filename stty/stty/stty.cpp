@@ -187,6 +187,7 @@ int main(int argc, const char **argv) {
 
 
 	std::optional<uint32_t> PID{ std::nullopt };
+	std::optional<HANDLE> hOut{ std::nullopt };
 	bool no_self_spawn{ false };
 
 	int i{ 1 };
@@ -209,9 +210,25 @@ int main(int argc, const char **argv) {
 				return 1;
 			}
 
-			PID = string_to_uint32(*next_arg);
+			PID = string_to_uint<uint32_t>(*next_arg);
 			if (!PID) {
 				fmt::print(stderr, "Process identifier supplied for option \"--pid\" is not a number in base ten.\n");
+				PrintUsage();
+				return 1;
+			}
+		}
+		else if (current_arg == "--no-self-spawn") {
+			no_self_spawn = true;
+		}
+		else if (current_arg == "--handle-out") {
+			if (!next_arg) {
+				fmt::print(stderr, "Missing value for option \"--handle_out\"");
+				PrintUsage();
+				return 1;
+			}
+			hOut = string_to_HANDLE(*next_arg);
+			if (!hOut) {
+				fmt::print(stderr, "value for option \"--handle-out\" is not a number or not in range.");
 				PrintUsage();
 				return 1;
 			}
@@ -220,10 +237,10 @@ int main(int argc, const char **argv) {
 			fmt::print(stderr, "Argument {}{}{} could not be interpreted", quote_open, current_arg, quote_close);
 		}
 
-
-
 		if (!next_arg)
 			break;
 		current_arg = *next_arg;
 	}
+
+	
 }

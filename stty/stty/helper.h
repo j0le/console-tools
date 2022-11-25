@@ -1,20 +1,23 @@
 #pragma once
-#include<optional>
+#include <optional>
 #include <cstdint>
 #include <string>
+#include <bit>
+
+#include <Windows.h>
 
 enum class result : bool { FAIL = false, SUCCESS = true };
 
 constexpr std::string_view quote_open{ "\xC2\xBB" };  // >> U+00BB
 constexpr std::string_view quote_close{ "\xC2\xAB" }; // << U+00AB
 
-constexpr std::optional<std::uint32_t> string_to_uint32(const std::string_view& str);
-constexpr std::optional<std::uint64_t> string_to_uint64(const std::string_view& str);
-
 // ---------
 
 #include <type_traits>
 #include <limits>
+
+
+
 
 template<class uint_type, std::size_t max_number_of_digits>
 constexpr std::optional<uint_type> string_base10_to_integer(const uint_type(&digits_of_max_number)[max_number_of_digits], const std::string_view& str) {
@@ -64,7 +67,12 @@ constexpr bool does_array_represent_max_number(const uint_type(&digits)[max_numb
     return value == std::numeric_limits<uint_type>::max();
 }
 
-constexpr std::optional<std::uint32_t> string_to_uint32(const std::string_view& str) {
+
+template<class uint>
+constexpr std::optional<uint> string_to_uint(const std::string_view& str);
+
+template<>
+constexpr std::optional<std::uint32_t> string_to_uint<uint32_t>(const std::string_view& str) {
 
     static_assert(sizeof(uint32_t) == 4);
     // 2^32 - 1  == 4'294'967'295
@@ -74,13 +82,31 @@ constexpr std::optional<std::uint32_t> string_to_uint32(const std::string_view& 
     return string_base10_to_integer(max_number_digits, str);
 }
 
-
-
-constexpr std::optional<std::uint64_t> string_to_uint64(const std::string_view& str) {
+             
+template<>
+constexpr std::optional<std::uint64_t> string_to_uint<uint64_t>(const std::string_view& str) {
 
     // 2^64 - 1 == 18446744073709551615
     constexpr const uint64_t digits_of_max_number[] = { 1,8,4,4,6,7,4,4,0,7,3,7,0,9,5,5,1,6,1,5 };
     static_assert(does_array_represent_max_number(digits_of_max_number));
 
     return string_base10_to_integer(digits_of_max_number, str);
+}
+
+
+
+
+constexpr std::optional<HANDLE> string_to_HANDLE(const std::string_view& str) {
+
+    static_assert(sizeof(HANDLE) == 4 || sizeof(HANDLE) == 8);
+
+    typedef std::enable_if_t< sizeof(HANDLE) == 4 || sizeof(HANDLE) == 8,
+        std::conditional_t<sizeof(HANDLE) == 4, uint32_t, uint64_t>>
+        uint_HANDLE;
+
+    std::optional<uint_HANDLE> uint_opt = string_to_uint<uint_HANDLE>(str);
+    if (!uint_opt)
+        return std::nullopt;
+    
+    return std::bit_cast<HANDLE>(*uint_opt);
 }
