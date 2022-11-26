@@ -136,9 +136,16 @@ void PrintFileType(FILE*stream, std::string_view leading, HANDLE handle) {
 	}
 }
 
+static bool is_handle_invalid(HANDLE h, bool strict = false) {
+	if (h == INVALID_HANDLE_VALUE || h == nullptr)
+		return true;
+	DWORD dummy;
+	return !GetHandleInformation(h, &dummy);
+}
+
 void PrintMode(FILE*stream, std::string_view name, HANDLE hStd) {
-	if (hStd == INVALID_HANDLE_VALUE || hStd == nullptr) {
-		fmt::print("{}: invalid\n", name);
+	if (is_handle_invalid(hStd, true)) {
+		fmt::print("{}: {:#x} invalid\n", name, std::bit_cast<uintptr_t>(hStd));
 	}
 	else {
 		static_assert(sizeof(HANDLE) == sizeof(uintptr_t));
@@ -157,6 +164,19 @@ void PrintMode(FILE*stream, std::string_view name, HANDLE hStd) {
 		PrintFileType(stream, "  ", hStd);
 	}
 }
+
+void PrintComparison(FILE* stream, std::string_view name1, HANDLE h1, std::string_view name2, HANDLE h2) {
+	if (!is_handle_invalid(h1, true) && !is_handle_invalid(h2, true)) {
+		if (h1 == h2)
+			fmt::print(stream, "The handles for {} and {} are equal.\n", name1,name2);
+		if (CompareObjectHandles(h1, h2))
+			fmt::print(stream, "The handles for {} and {} point to the same kernel object.\n",name1,name2);
+		else
+			fmt::print(stream, "The handles for {} and {} do not point to the same kernel object.{}\n",name1,name2,
+				h1 == h2 ? " It seems like, the object they are pointing to is not a kernel object, but some other kind of object." : "");
+	}
+}
+
 
 void PrintInfo(FILE*stream) {
 	UINT acp = GetACP();
@@ -177,14 +197,32 @@ void PrintInfo(FILE*stream) {
 	HANDLE hStdErr = GetStdHandle(STD_ERROR_HANDLE);
 	PrintMode(stream, "stderr", hStdErr);
 
-	if (hStdOut != INVALID_HANDLE_VALUE && hStdErr != INVALID_HANDLE_VALUE) {
-		if (hStdOut == hStdErr)
-			fmt::print(stream, "The handles for stdout and stderr are equal.\n");
-		if (CompareObjectHandles(hStdOut, hStdErr))
-			fmt::print(stream, "The handles for stdout and stderr point to the same kernel object.\n");
-		else
-			fmt::print(stream, "The handles for stdout and stderr do not point to the same kernel object.{}\n",
-				hStdOut == hStdErr ? " It seems like, the object they are pointing to is not a kernel object, but some other kind of object." : "");
+	HANDLE hConOut{nullptr};
+	{
+		SECURITY_ATTRIBUTES sa{ .nLength{sizeof(sa)}, .lpSecurityDescriptor{nullptr}, .bInheritHandle{true} };
+		hConOut = CreateFileA("CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, nullptr);
+		PrintMode(stream, "CONOUT$", hConOut);
+	}
+	HANDLE hConIn{ nullptr };
+	{
+		SECURITY_ATTRIBUTES sa{ .nLength{sizeof(sa)}, .lpSecurityDescriptor{nullptr}, .bInheritHandle{true} };
+		hConIn = CreateFileA("CONIN$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, &sa, OPEN_EXISTING, 0, nullptr);
+		PrintMode(stream, "CONIN$", hConIn);
+	}
+
+	PrintComparison(stream, "stdout", hStdOut, "stderr",  hStdErr);
+	PrintComparison(stream, "stdout", hStdOut, "CONOUT$", hConOut);
+	PrintComparison(stream, "stderr", hStdErr, "CONOUT$", hConOut);
+	PrintComparison(stream, "stdin",  hStdIn,  "CONIN$",  hConIn);
+
+	if (!is_handle_invalid(hConOut)) {
+		CloseHandle(hConOut);
+		hConOut = nullptr;
+	}
+
+	if (!is_handle_invalid(hConIn)) {
+		CloseHandle(hConIn);
+		hConIn = nullptr;
 	}
 }
 
@@ -217,8 +255,6 @@ bool AttachToConsoleAndPrintInfo(FILE*stream, uint32_t PID) {
 
 	fmt::print(stream, "DEBUG: out after free&attach: {:#x}\n", std::bit_cast<uintptr_t>(GetStdHandle(STD_OUTPUT_HANDLE)));
 
-	// TODO: open console handles, set std handle.  Skipping for now
-	
 	PrintInfo(stream);
 	return true;
 }
