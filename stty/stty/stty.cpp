@@ -223,8 +223,12 @@ bool AttachToConsoleAndPrintInfo(FILE*stream, uint32_t PID) {
 	return true;
 }
 
-bool SpawnSelf(FILE* stream) {
-	fmt::print(stream, "SpawnSelf() not implemented\n");
+bool SpawnSelf(FILE* fOut, FILE *fErr) {
+	HANDLE hOut = std::bit_cast<HANDLE>(_get_osfhandle(_fileno(fOut)));
+	HANDLE hErr = std::bit_cast<HANDLE>(_get_osfhandle(_fileno(fErr)));
+
+
+	fmt::print(fErr, "SpawnSelf() not implemented\n");
 	return false;
 }
 
@@ -335,12 +339,17 @@ int main(int argc, const char **argv) {
 	}
 
 	if (handle_err) {
-		int fd = _open_osfhandle(handle_err.value(), 0);
-		if (fd == -1)
-			return 1;
-		fErr = _fdopen(fd, "w");
-		if (fOut == nullptr)
-			return 1;
+		if (handle_out && *handle_out == *handle_err) {
+			fErr = fOut;
+		}
+		else {
+			int fd = _open_osfhandle(handle_err.value(), 0);
+			if (fd == -1)
+				return 1;
+			fErr = _fdopen(fd, "w");
+			if (fOut == nullptr)
+				return 1;
+		}
 	}
 
 
@@ -350,7 +359,7 @@ int main(int argc, const char **argv) {
 				return 1;
 		}
 		else {
-			if (!SpawnSelf(fOut))
+			if (!SpawnSelf(fOut,fErr))
 				return 1;
 		}
 	}
