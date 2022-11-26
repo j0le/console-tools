@@ -106,7 +106,7 @@ void PrintFileType(FILE*stream, std::string_view leading, HANDLE handle) {
 		break;
 	}
 	default:
-		fmt::print(stream, "{}Filetype: {:#0x} - this is unexpected, undocumented and an error", leading, file_type);
+		fmt::print(stream, "{}Filetype: {:#0x} - this is unexpected, undocumented and an error\n", leading, file_type);
 		break;
 	}
 }
@@ -126,7 +126,7 @@ void PrintMode(FILE*stream, std::string_view name, HANDLE hStd) {
 		else {
 			auto error = GetLastError();
 			auto message = get_error_message(error);
-			fmt::print(stream, "  console mode: error {:#x} \"{}\"", error, message.value_or(""));
+			fmt::print(stream, "  console mode: error {:#x} \"{}\"\n", error, message.value_or(""));
 		}
 
 		PrintFileType(stream, "  ", hStd);
@@ -210,7 +210,17 @@ int main(int argc, const char **argv) {
 		return 0;
 	}
 	if (GetACP() != 65001) {
-		fmt::print(stderr, "The Active Code Page is not UTF-8. Commandline parsing not supported.\n");
+		fmt::print(stderr, "The Active Code Page (ACP) for this process is not UTF-8 (65001).\n"
+			"Command line parsing is not supported.\n"
+			"Your version of Windows might be to old, so that the manifest embedded in the executable is not read. "
+			"The manifest specifies, that this executable wants UTF-8 as ACP.\n"
+			"As a workaround you can activate \"Beta: Use Unicode UTF-8 for worldwide language support\":\n"
+			"  - Press Win+R\n"
+			"  - Type \"intl.cpl\"\n"
+			"  - Goto Tab \"Administrative\"\n"
+			"  - Click on \"Change system locale\"\n"
+			"  - Set Checkbox \"Beta: Use Unicode UTF-8 for worldwide language support\"\n"
+			"\n");
 		PrintUsage(stderr);
 		return 1;
 	}
@@ -252,14 +262,14 @@ int main(int argc, const char **argv) {
 		}
 		else if (current_arg == "--handle-out") {
 			if (!next_arg) {
-				fmt::print(stderr, "Missing value for option \"--handle-out\"");
+				fmt::print(stderr, "Missing value for option \"--handle-out\"\n");
 				PrintUsage(stderr);
 				return 1;
 			}
 			i += 1;
 			auto opt_uint = string_to_uint<uintptr_t>(*next_arg);
 			if (!opt_uint) {
-				fmt::print(stderr, "value for option \"--handle-out\" is not a number or not in range.");
+				fmt::print(stderr, "value for option \"--handle-out\" is not a number or not in range.\n");
 				PrintUsage(stderr);
 				return 1;
 			}
@@ -267,21 +277,22 @@ int main(int argc, const char **argv) {
 		}
 		else if (current_arg == "--handle-err") {
 			if (!next_arg) {
-				fmt::print(stderr, "Missing value for option \"--handle-err\"");
+				fmt::print(stderr, "Missing value for option \"--handle-err\"\n");
 				PrintUsage(stderr);
 				return 1;
 			}
 			i += 1;
 			auto opt_uint = string_to_uint<uintptr_t>(*next_arg);
 			if (!opt_uint) {
-				fmt::print(stderr, "value for option \"--handle-err\" is not a number or not in range.");
+				fmt::print(stderr, "value for option \"--handle-err\" is not a number or not in range.\n");
 				PrintUsage(stderr);
 				return 1;
 			}
 			handle_err = std::bit_cast<intptr_t>(opt_uint.value());
 		}
 		else {
-			fmt::print(stderr, "Argument {}{}{} could not be interpreted", quote_open, current_arg, quote_close);
+			fmt::print(stderr, "Argument {}{}{} could not be interpreted\n", quote_open, current_arg, quote_close);
+			PrintUsage(stderr);
 			return 1;
 		}
 	}
@@ -299,7 +310,7 @@ int main(int argc, const char **argv) {
 	}
 
 	if (handle_err) {
-		int fd = _open_osfhandle(handle_out.value(), 0);
+		int fd = _open_osfhandle(handle_err.value(), 0);
 		if (fd == -1)
 			return 1;
 		fErr = _fdopen(fd, "w");
