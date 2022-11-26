@@ -184,6 +184,7 @@ bool AttachToConsole(uint32_t PID) {
 }
 
 int main_disabled(int argc, const char **argv) {
+int main(int argc, const char **argv) {
 
 	if (argc <= 1) {
 		PrintInfo(stdout);
@@ -201,9 +202,8 @@ int main_disabled(int argc, const char **argv) {
 	std::optional<intptr_t> handle_err{ std::nullopt };
 	bool no_self_spawn{ false };
 
-	int i{ 1 };
+	for (int i = 1; i < argc; ++i) {
 	std::string_view current_arg{ argv[i] };
-	while(true) {
 		std::optional<std::string_view> next_arg{ std::nullopt };
 
 		{
@@ -220,7 +220,7 @@ int main_disabled(int argc, const char **argv) {
 				PrintUsage(stderr);
 				return 1;
 			}
-
+			i += 1;
 			PID = string_to_uint<uint32_t>(*next_arg);
 			if (!PID) {
 				fmt::print(stderr, "Process identifier supplied for option \"--pid\" is not a number in base ten.\n");
@@ -237,6 +237,7 @@ int main_disabled(int argc, const char **argv) {
 				PrintUsage(stderr);
 				return 1;
 			}
+			i += 1;
 			auto opt_uint = string_to_uint<uintptr_t>(*next_arg);
 			if (!opt_uint) {
 				fmt::print(stderr, "value for option \"--handle-out\" is not a number or not in range.");
@@ -251,6 +252,7 @@ int main_disabled(int argc, const char **argv) {
 				PrintUsage(stderr);
 				return 1;
 			}
+			i += 1;
 			auto opt_uint = string_to_uint<uintptr_t>(*next_arg);
 			if (!opt_uint) {
 				fmt::print(stderr, "value for option \"--handle-err\" is not a number or not in range.");
@@ -261,11 +263,8 @@ int main_disabled(int argc, const char **argv) {
 		}
 		else {
 			fmt::print(stderr, "Argument {}{}{} could not be interpreted", quote_open, current_arg, quote_close);
+			return 1;
 		}
-
-		if (!next_arg)
-			break;
-		current_arg = *next_arg;
 	}
 
 	FILE* fOut = stdout;
