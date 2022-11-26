@@ -46,10 +46,10 @@ static_assert(UTF_8_test_2[0] == static_cast<char>(0xC3u));
 static_assert(UTF_8_test_2[1] == static_cast<char>(0xBCu));
 static_assert(UTF_8_test_2[2] == static_cast<char>(0x0u));
 
-bool get_error_message(DWORD error_code, ::std::string& message) {
+std::optional<std::string> get_error_message(DWORD error_code) {
 
 	LPWSTR wstr_buffer = nullptr;
-	bool return_value{ true };
+	std::optional<std::string> message_opt{};
 	DWORD number_of_wchars_without_terminating_nul = ::FormatMessageW(
 		FORMAT_MESSAGE_IGNORE_INSERTS   // ignore paremeter "Arguments"
 		| FORMAT_MESSAGE_FROM_SYSTEM |
@@ -66,20 +66,17 @@ bool get_error_message(DWORD error_code, ::std::string& message) {
 
 		0,                 // nSize. We don't know the size yet
 		nullptr);
-	if (number_of_wchars_without_terminating_nul == 0) {
-		return_value = false;
-	}
-	else {
-		message = ::nowide::narrow(wstr_buffer,
+	if (number_of_wchars_without_terminating_nul != 0) {
+		message_opt = ::nowide::narrow(wstr_buffer,
 			number_of_wchars_without_terminating_nul);
 	}
 
 	if (wstr_buffer != nullptr) {
 		if (LocalFree(wstr_buffer) != nullptr) {
-			return_value = false;
+			message_opt.reset();
 		}
 	}
-	return return_value;
+	return message_opt;
 }
 
 void PrintFileType(FILE*stream, std::string_view leading, HANDLE handle) {
@@ -103,9 +100,8 @@ void PrintFileType(FILE*stream, std::string_view leading, HANDLE handle) {
 			fmt::print(stream, "{}Filetype: FILE_TYPE_UNKNOWN\n",leading);
 		}
 		else {
-			std::string error_message{};
-			bool got_msg = get_error_message(error, error_message);
-			fmt::print(stream, "{0}Filetype: FILE_TYPE_UNKNOWN, error: {1:#x} {1:d} \"{2}\"\n",leading, error, got_msg?error_message:"");
+			auto error_message = get_error_message(error);
+			fmt::print(stream, "{0}Filetype: FILE_TYPE_UNKNOWN, error: {1:#x} {1:d} \"{2}\"\n",leading, error, error_message.value_or(""));
 		}
 		break;
 	}
@@ -129,9 +125,8 @@ void PrintMode(FILE*stream, std::string_view name, HANDLE hStd) {
 		}
 		else {
 			auto error = GetLastError();
-			std::string message{};
-			get_error_message(error, message);
-			fmt::print(stream, "  console mode: error {:#x} \"{}\"", error, message);
+			auto message = get_error_message(error);
+			fmt::print(stream, "  console mode: error {:#x} \"{}\"", error, message.value_or(""));
 		}
 
 		PrintFileType(stream, "  ", hStd);
@@ -176,14 +171,38 @@ void PrintUsage(FILE*stream) {
 	);
 }
 
-bool AttachToConsole(uint32_t PID) {
-	// free console
-	// attach console
-	// print info
+bool AttachToConsoleAndPrintInfo(FILE*stream, uint32_t PID) {
+	fmt::print(stream, "DEBUG: out before free&attach: {:#x}\n", std::bit_cast<uintptr_t>(GetStdHandle(STD_OUTPUT_HANDLE)));
+
+	if (!FreeConsole()) {
+		auto error = GetLastError();
+		auto message = get_error_message(error);
+		fmt::print(stream, "FreeConsole() failed, but we are ignoring that. The error is {:#x} with message is {}{}{}\n",
+			error, quote_open, message.value_or(""), quote_close);
+	}
+	static_assert(sizeof(PID) == sizeof(DWORD) && std::is_unsigned_v<decltype(PID)> == std::is_unsigned_v<DWORD>);
+	if (!AttachConsole(PID)) {
+		auto error = GetLastError();
+		auto message = get_error_message(error);
+		fmt::print(stream, "AttachConsole({}) failed with error {}{}{}\n", PID, error, quote_open, message.value_or(""), quote_close);
+		return false;
+	}
+	fmt::print("Attached to console of process {}\n", PID);
+
+
+	fmt::print(stream, "DEBUG: out after free&attach: {:#x}\n", std::bit_cast<uintptr_t>(GetStdHandle(STD_OUTPUT_HANDLE)));
+
+	// TODO: open console handles, set std handle.  Skipping for now
+	
+	PrintInfo(stream);
 	return true;
 }
 
-int main_disabled(int argc, const char **argv) {
+bool SpawnSelf(FILE* stream) {
+	fmt::print(stream, "SpawnSelf() not implemented\n");
+	return false;
+}
+
 int main(int argc, const char **argv) {
 
 	if (argc <= 1) {
@@ -203,7 +222,7 @@ int main(int argc, const char **argv) {
 	bool no_self_spawn{ false };
 
 	for (int i = 1; i < argc; ++i) {
-	std::string_view current_arg{ argv[i] };
+		std::string_view current_arg{ argv[i] };
 		std::optional<std::string_view> next_arg{ std::nullopt };
 
 		{
@@ -291,11 +310,12 @@ int main(int argc, const char **argv) {
 
 	if (PID.has_value()) {
 		if (no_self_spawn) {
-			if (!AttachConsole(*PID))
+			if (!AttachToConsoleAndPrintInfo(fOut, *PID))
 				return 1;
 		}
 		else {
-			// TODO: Self Spawn
+			if (!SpawnSelf(fOut))
+				return 1;
 		}
 	}
 	else {
