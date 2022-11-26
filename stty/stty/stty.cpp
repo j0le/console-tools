@@ -5,6 +5,7 @@
 #include <optional>
 #include <cstdint>
 #include <thread>
+#include <sstream>
 #include <io.h>
 
 #include "helper.h"
@@ -79,6 +80,30 @@ std::optional<std::string> get_error_message(DWORD error_code) {
 	return message_opt;
 }
 
+std::string indent_message(const std::string_view& spaces, const std::string& str) {
+	std::ostringstream oss{};
+	size_t next_start_index_of_substr{ 0 };
+	for (size_t i = 0; i < str.length(); ++i) {
+		char c = str[i];
+		if (c == '\n') {
+			if (next_start_index_of_substr == 0 && i == str.length() - 1)
+				return str;
+			else {
+				if (next_start_index_of_substr == 0 && i != 0)
+					oss << '\n';
+				oss << spaces << str.substr(next_start_index_of_substr, i - next_start_index_of_substr + 1);
+				next_start_index_of_substr = i + 1;
+			}
+		}
+	}
+
+	if (str.length() == next_start_index_of_substr)
+		return oss.str();
+
+	oss << spaces << str.substr(next_start_index_of_substr, str.length() - next_start_index_of_substr) << '\n';
+	return oss.str();
+}
+
 void PrintFileType(FILE*stream, std::string_view leading, HANDLE handle) {
 	auto file_type = GetFileType(handle);
 	switch (file_type) {
@@ -101,7 +126,7 @@ void PrintFileType(FILE*stream, std::string_view leading, HANDLE handle) {
 		}
 		else {
 			auto error_message = get_error_message(error);
-			fmt::print(stream, "{0}Filetype: FILE_TYPE_UNKNOWN, error: {1:#x} {1:d} \"{2}\"\n",leading, error, error_message.value_or(""));
+			fmt::print(stream, "{0}Filetype: FILE_TYPE_UNKNOWN, error: {1:#x} {1:d} - {2}",leading, error, indent_message(std::string{leading}+"  ", error_message.value_or("")));
 		}
 		break;
 	}
@@ -126,7 +151,7 @@ void PrintMode(FILE*stream, std::string_view name, HANDLE hStd) {
 		else {
 			auto error = GetLastError();
 			auto message = get_error_message(error);
-			fmt::print(stream, "  console mode: error {:#x} \"{}\"\n", error, message.value_or(""));
+			fmt::print(stream, "  console mode: error {:#x} - {}", error, indent_message("    ", message.value_or("")));
 		}
 
 		PrintFileType(stream, "  ", hStd);
