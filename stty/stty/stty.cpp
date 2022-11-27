@@ -146,17 +146,21 @@ static bool is_handle_invalid(HANDLE h, bool strict = false) {
 	DWORD dummy;
 	return !GetHandleInformation(h, &dummy);
 }
+struct handle_with_name {
+	HANDLE handle{ nullptr };
+	std::string_view name{};
+};
 
-void PrintMode(FILE*stream, std::string_view name, HANDLE hStd) {
-	if (is_handle_invalid(hStd, true)) {
-		fmt::print("{}: {:#x} invalid\n", name, std::bit_cast<uintptr_t>(hStd));
+void PrintMode(FILE*stream, handle_with_name h) {
+	if (is_handle_invalid(h.handle, true)) {
+		fmt::print("{}: {:#x} invalid\n", h.name, std::bit_cast<uintptr_t>(h.handle));
 	}
 	else {
 		static_assert(sizeof(HANDLE) == sizeof(uintptr_t));
 
-		fmt::print(stream, "{}: {:#x}\n", name, std::bit_cast<uintptr_t>(hStd));
+		fmt::print(stream, "{}: {:#x}\n", h.name, std::bit_cast<uintptr_t>(h.handle));
 		DWORD console_output_mode{};
-		if (GetConsoleMode(hStd, &console_output_mode)) {
+		if (GetConsoleMode(h.handle, &console_output_mode)) {
 			fmt::print(stream, "  console mode: {:#0{}b}\n", console_output_mode, sizeof(console_output_mode) * 8 + 2);
 		}
 		else {
@@ -165,19 +169,28 @@ void PrintMode(FILE*stream, std::string_view name, HANDLE hStd) {
 			fmt::print(stream, "  console mode: error {:#x} - {}", error, indent_message("    ", message.value_or("")));
 		}
 
-		PrintFileType(stream, "  ", hStd);
+		PrintFileType(stream, "  ", h.handle);
 	}
 }
 
-void PrintComparison(FILE* stream, std::string_view name1, HANDLE h1, std::string_view name2, HANDLE h2) {
-	if (!is_handle_invalid(h1, true) && !is_handle_invalid(h2, true)) {
-		if (h1 == h2)
-			fmt::print(stream, "The handles for {} and {} are equal.\n", name1,name2);
-		if (CompareObjectHandles(h1, h2))
-			fmt::print(stream, "The handles for {} and {} point to the same kernel object.\n",name1,name2);
+void PrintComparison(FILE* stream, handle_with_name hn1, handle_with_name hn2) {
+	if (!is_handle_invalid(hn1.handle, true) && !is_handle_invalid(hn2.handle, true)) {
+		if (hn1.handle == hn2.handle)
+			fmt::print(stream, "The handles for {} and {} are equal.\n", hn1.name, hn2.name);
+		if (CompareObjectHandles(hn1.handle, hn2.handle))
+			fmt::print(stream, "The handles for {} and {} point to the same kernel object.\n",hn1.name,hn2.name);
 		else
-			fmt::print(stream, "The handles for {} and {} do not point to the same kernel object.{}\n",name1,name2,
-				h1 == h2 ? " It seems like, the object they are pointing to is not a kernel object, but some other kind of object." : "");
+			fmt::print(stream, "The handles for {} and {} do not point to the same kernel object.{}\n",hn1.name, hn2.name,
+				hn1.handle == hn2.handle ? " It seems like, the object they are pointing to is not a kernel object, but some other kind of object." : "");
+	}
+}
+
+void CompareEveryThing(FILE* stream, std::vector<handle_with_name> handles) {
+
+	for (int i = 0; i < handles.size(); ++i) {
+		for (int j = i+1; j < handles.size(); ++j) {
+			PrintComparison(stream, handles[i], handles[j]);
+		}
 	}
 }
 
@@ -205,50 +218,72 @@ void PrintInfo(FILE*stream) {
 	// -----------------------
 	fmt::print(stream, "\n\nIN:\n\n");
 
-	HANDLE hStdIn = GetStdHandle(STD_INPUT_HANDLE);
-	PrintMode(stream, "stdin", hStdIn);
+	handle_with_name hC_stdin{
+		.handle{reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(stdin)))},
+		.name{"stdin"}
+	};
+	PrintMode(stream, hC_stdin);
 
-	HANDLE hConIn{ nullptr };
+	handle_with_name hStdIn{ .handle{ GetStdHandle(STD_INPUT_HANDLE)}, .name{"STD_INPUT_HANDLE"} };
+	PrintMode(stream, hStdIn);
+
+	handle_with_name hConIn{ .handle{nullptr}, .name{"CONIN$"} };
 	{
 		SECURITY_ATTRIBUTES sa{ .nLength{sizeof(sa)}, .lpSecurityDescriptor{nullptr}, .bInheritHandle{false} };
-		hConIn = CreateFileA("CONIN$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, &sa, OPEN_EXISTING, 0, nullptr);
-		PrintMode(stream, "CONIN$", hConIn);
+		hConIn.handle = CreateFileA("CONIN$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, &sa, OPEN_EXISTING, 0, nullptr);
+		PrintMode(stream, hConIn);
 	}
 
 	fmt::print(stream, "\n");
-	PrintComparison(stream, "stdin", hStdIn, "CONIN$", hConIn);
+	CompareEveryThing(stream, std::vector{ hC_stdin, hStdIn, hConIn });
 
 	// -----------------------
 	fmt::print(stream, "\n\nOUT:\n\n");
 
-	HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
-	PrintMode(stream, "stdout", hStdOut);
+	handle_with_name hC_stdout{ 
+		.handle{reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(stdout)))}, 
+		.name{"stdout"}
+	};
+	PrintMode(stream, hC_stdout);
 
-	HANDLE hStdErr = GetStdHandle(STD_ERROR_HANDLE);
-	PrintMode(stream, "stderr", hStdErr);
+	handle_with_name hC_stderr{
+		.handle{reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(stderr)))},
+		.name{"stderr"}
+	};
+	PrintMode(stream, hC_stderr);
 
-	HANDLE hConOut{nullptr};
+	handle_with_name hStdOut{ 
+		.handle{ GetStdHandle(STD_OUTPUT_HANDLE)}, 
+		.name{"STD_OUTPUT_HANDLE"}
+	};
+	PrintMode(stream, hStdOut);
+
+	handle_with_name hStdErr{
+		.handle {GetStdHandle(STD_ERROR_HANDLE)},
+		.name{"STD_ERROR_HANDLE"}
+	};
+	PrintMode(stream,  hStdErr);
+
+	handle_with_name hConOut{ .handle{nullptr}, .name{"CONOUT$"} };
 	{
 		SECURITY_ATTRIBUTES sa{ .nLength{sizeof(sa)}, .lpSecurityDescriptor{nullptr}, .bInheritHandle{false} };
-		hConOut = CreateFileA("CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, nullptr);
-		PrintMode(stream, "CONOUT$", hConOut);
-		TestWriteConsole(stream, hConOut);
+		hConOut.handle = CreateFileA("CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, nullptr);
+		PrintMode(stream, hConOut);
+		TestWriteConsole(stream, hConOut.handle);
 	}
 
 	fmt::print(stream,"\n");
 
-	PrintComparison(stream, "stdout", hStdOut, "CONOUT$", hConOut);
-	PrintComparison(stream, "stderr", hStdErr, "CONOUT$", hConOut);
-	PrintComparison(stream, "stdout", hStdOut, "stderr",  hStdErr);
+	CompareEveryThing(stream, std::vector{hC_stdout, hC_stderr, hStdOut, hStdErr, hConOut});
 
-	if (!is_handle_invalid(hConOut)) {
-		CloseHandle(hConOut);
-		hConOut = nullptr;
+	if (!is_handle_invalid(hConOut.handle)) {
+		CloseHandle(hConOut.handle);
+		hConOut.handle = nullptr;
 	}
 
-	if (!is_handle_invalid(hConIn)) {
-		CloseHandle(hConIn);
-		hConIn = nullptr;
+	if (!is_handle_invalid(hConIn.handle)) {
+		CloseHandle(hConIn.handle);
+		hConIn.handle = nullptr;
 	}
 }
 
@@ -262,6 +297,7 @@ void PrintUsage(FILE*stream) {
 
 bool AttachToConsoleAndPrintInfo(FILE*stream, uint32_t PID) {
 	fmt::print(stream, "DEBUG: out before free&attach: {:#x}\n", std::bit_cast<uintptr_t>(GetStdHandle(STD_OUTPUT_HANDLE)));
+	PrintInfo(stream);
 
 	if (!FreeConsole()) {
 		auto error = GetLastError();
@@ -280,8 +316,8 @@ bool AttachToConsoleAndPrintInfo(FILE*stream, uint32_t PID) {
 
 
 	fmt::print(stream, "DEBUG: out after free&attach: {:#x}\n", std::bit_cast<uintptr_t>(GetStdHandle(STD_OUTPUT_HANDLE)));
-
 	PrintInfo(stream);
+
 	return true;
 }
 
