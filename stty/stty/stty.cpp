@@ -359,11 +359,13 @@ bool SpawnSelf(FILE* fOut, FILE *fErr, DWORD pid) {
 				break;
 			if (dwBytesRead == 0)
 				break;
-			bytesWritten = fwrite(szBuffer, element_size, dwBytesRead / element_size, fOut);
-			if (bytesWritten != dwBytesRead) {
-				// error
+			if (dwBytesRead > BUFF_SIZE) {
+				fmt::print(fErr, "Unexpected error when using ReadFile().\n");
 				goto cleanup;
 			}
+
+			std::string_view sv(szBuffer, dwBytesRead);
+			fmt::print(fOut, "{}", sv); // this can also print zero bytes ('\0' ASCII NUL)
 		} while (true);
 	}
 
