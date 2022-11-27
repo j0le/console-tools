@@ -49,6 +49,8 @@ static_assert(UTF_8_test_2[0] == static_cast<char>(0xC3u));
 static_assert(UTF_8_test_2[1] == static_cast<char>(0xBCu));
 static_assert(UTF_8_test_2[2] == static_cast<char>(0x0u));
 
+constexpr const std::string_view UTF_8_thumbs_up_with_skin_tone = "\xf0\x9f\x91\x8d\xf0\x9f\x8f\xbb";
+
 std::optional<std::string> get_error_message(DWORD error_code) {
 
 	LPWSTR wstr_buffer = nullptr;
@@ -181,6 +183,9 @@ void PrintComparison(FILE* stream, std::string_view name1, HANDLE h1, std::strin
 
 
 void PrintInfo(FILE*stream) {
+
+	fmt::print(stream, "DEBUG: äöü {}{}{}\n", quote_open, UTF_8_thumbs_up_with_skin_tone, quote_close);
+
 	UINT acp = GetACP();
 	UINT oem_cp = GetACP();
 	UINT console_input_cp = GetConsoleCP();
