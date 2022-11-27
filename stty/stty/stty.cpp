@@ -185,13 +185,13 @@ void PrintInfo(FILE*stream) {
 	UINT oem_cp = GetACP();
 	UINT console_input_cp = GetConsoleCP();
 	UINT console_output_cp = GetConsoleOutputCP();
-	fmt::print("ACP:               {}\n", acp);
-	fmt::print("OEM CP:            {}\n", oem_cp);
-	fmt::print("Console Input CP:  {}\n", console_input_cp);
-	fmt::print("Console Output CP: {}\n", console_output_cp);
+	fmt::print(stream, "ACP:               {}\n", acp);
+	fmt::print(stream, "OEM CP:            {}\n", oem_cp);
+	fmt::print(stream, "Console Input CP:  {}\n", console_input_cp);
+	fmt::print(stream, "Console Output CP: {}\n", console_output_cp);
 
 	// -----------------------
-	fmt::print("\n\nIN:\n\n");
+	fmt::print(stream, "\n\nIN:\n\n");
 
 	HANDLE hStdIn = GetStdHandle(STD_INPUT_HANDLE);
 	PrintMode(stream, "stdin", hStdIn);
@@ -203,11 +203,11 @@ void PrintInfo(FILE*stream) {
 		PrintMode(stream, "CONIN$", hConIn);
 	}
 
-	fmt::print("\n");
+	fmt::print(stream, "\n");
 	PrintComparison(stream, "stdin", hStdIn, "CONIN$", hConIn);
 
 	// -----------------------
-	fmt::print("\n\nOUT:\n\n");
+	fmt::print(stream, "\n\nOUT:\n\n");
 
 	HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
 	PrintMode(stream, "stdout", hStdOut);
@@ -222,7 +222,7 @@ void PrintInfo(FILE*stream) {
 		PrintMode(stream, "CONOUT$", hConOut);
 	}
 
-	fmt::print("\n");
+	fmt::print(stream,"\n");
 
 	PrintComparison(stream, "stdout", hStdOut, "CONOUT$", hConOut);
 	PrintComparison(stream, "stderr", hStdErr, "CONOUT$", hConOut);
@@ -263,7 +263,7 @@ bool AttachToConsoleAndPrintInfo(FILE*stream, uint32_t PID) {
 		fmt::print(stream, "AttachConsole({}) failed with error {}{}{}\n", PID, error, quote_open, message.value_or(""), quote_close);
 		return false;
 	}
-	fmt::print("Attached to console of process {}\n", PID);
+	fmt::print(stream, "Attached to console of process {}\n", PID);
 
 
 	fmt::print(stream, "DEBUG: out after free&attach: {:#x}\n", std::bit_cast<uintptr_t>(GetStdHandle(STD_OUTPUT_HANDLE)));
