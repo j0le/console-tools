@@ -181,6 +181,13 @@ void PrintComparison(FILE* stream, std::string_view name1, HANDLE h1, std::strin
 	}
 }
 
+void TestWriteConsole(FILE*stream, HANDLE conout) {
+	constexpr const std::wstring_view wsv = L"Moin Moin\n";
+	DWORD written;
+	bool success = WriteConsoleW(conout, wsv.data(), wsv.size(), &written, nullptr);
+	fmt::print(stream, "  WriteConsoleW result: {}\n", success?"success":"fail");
+}
+
 
 void PrintInfo(FILE*stream) {
 
@@ -225,6 +232,7 @@ void PrintInfo(FILE*stream) {
 		SECURITY_ATTRIBUTES sa{ .nLength{sizeof(sa)}, .lpSecurityDescriptor{nullptr}, .bInheritHandle{false} };
 		hConOut = CreateFileA("CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, nullptr);
 		PrintMode(stream, "CONOUT$", hConOut);
+		TestWriteConsole(stream, hConOut);
 	}
 
 	fmt::print(stream,"\n");
