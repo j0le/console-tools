@@ -190,8 +190,24 @@ void PrintInfo(FILE*stream) {
 	fmt::print("Console Input CP:  {}\n", console_input_cp);
 	fmt::print("Console Output CP: {}\n", console_output_cp);
 
+	// -----------------------
+	fmt::print("\n\nIN:\n\n");
+
 	HANDLE hStdIn = GetStdHandle(STD_INPUT_HANDLE);
 	PrintMode(stream, "stdin", hStdIn);
+
+	HANDLE hConIn{ nullptr };
+	{
+		SECURITY_ATTRIBUTES sa{ .nLength{sizeof(sa)}, .lpSecurityDescriptor{nullptr}, .bInheritHandle{false} };
+		hConIn = CreateFileA("CONIN$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, &sa, OPEN_EXISTING, 0, nullptr);
+		PrintMode(stream, "CONIN$", hConIn);
+	}
+
+	fmt::print("\n");
+	PrintComparison(stream, "stdin", hStdIn, "CONIN$", hConIn);
+
+	// -----------------------
+	fmt::print("\n\nOUT:\n\n");
 
 	HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
 	PrintMode(stream, "stdout", hStdOut);
@@ -201,21 +217,16 @@ void PrintInfo(FILE*stream) {
 
 	HANDLE hConOut{nullptr};
 	{
-		SECURITY_ATTRIBUTES sa{ .nLength{sizeof(sa)}, .lpSecurityDescriptor{nullptr}, .bInheritHandle{true} };
+		SECURITY_ATTRIBUTES sa{ .nLength{sizeof(sa)}, .lpSecurityDescriptor{nullptr}, .bInheritHandle{false} };
 		hConOut = CreateFileA("CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, nullptr);
 		PrintMode(stream, "CONOUT$", hConOut);
 	}
-	HANDLE hConIn{ nullptr };
-	{
-		SECURITY_ATTRIBUTES sa{ .nLength{sizeof(sa)}, .lpSecurityDescriptor{nullptr}, .bInheritHandle{true} };
-		hConIn = CreateFileA("CONIN$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, &sa, OPEN_EXISTING, 0, nullptr);
-		PrintMode(stream, "CONIN$", hConIn);
-	}
 
-	PrintComparison(stream, "stdout", hStdOut, "stderr",  hStdErr);
+	fmt::print("\n");
+
 	PrintComparison(stream, "stdout", hStdOut, "CONOUT$", hConOut);
 	PrintComparison(stream, "stderr", hStdErr, "CONOUT$", hConOut);
-	PrintComparison(stream, "stdin",  hStdIn,  "CONIN$",  hConIn);
+	PrintComparison(stream, "stdout", hStdOut, "stderr",  hStdErr);
 
 	if (!is_handle_invalid(hConOut)) {
 		CloseHandle(hConOut);
