@@ -6,7 +6,9 @@
 #include <cstdint>
 #include <thread>
 #include <sstream>
+#include <memory>
 #include <io.h>
+#include <fcntl.h>
 
 #include "helper.h"
 
@@ -259,16 +261,153 @@ bool AttachToConsoleAndPrintInfo(FILE*stream, uint32_t PID) {
 	return true;
 }
 
-bool SpawnSelf(FILE* fOut, FILE *fErr) {
-	HANDLE hOut = std::bit_cast<HANDLE>(_get_osfhandle(_fileno(fOut)));
-	HANDLE hErr = std::bit_cast<HANDLE>(_get_osfhandle(_fileno(fErr)));
+std::optional<std::string> GetProgPath(FILE*streamErr) {
+	std::string ret{};
+	for (DWORD buffer_size = 0x100u; buffer_size < 0x10000u && buffer_size >= 0x100u; buffer_size *= 2u) {
+		auto prog_name = std::make_unique<CHAR[]>(buffer_size);
+		DWORD result = GetModuleFileNameA(nullptr, prog_name.get(), buffer_size);
+
+		if (result == 0) {
+			auto error = GetLastError();
+			fmt::print(streamErr, "Couldn't get name of the program - {}\n", get_error_message(error).value_or(""));
+			return std::nullopt;
+		}
+
+		if (result < buffer_size) {
+			return std::string(prog_name.get());
+		}
+
+		auto error = GetLastError();
+		if (error != ERROR_INSUFFICIENT_BUFFER)
+			continue;
+
+		fmt::print(streamErr, "Unexpected error: {}\n", get_error_message(error).value_or(""));
+		return std::nullopt;
+	}
+	
+	fmt::print(streamErr, "The path to this program is to long.\n");
+	return std::nullopt;
+}
+
+bool SpawnSelf(FILE* fOut, FILE *fErr, DWORD pid) {
+
+	//HANDLE hOut = std::bit_cast<HANDLE>(_get_osfhandle(_fileno(fOut)));
+	//HANDLE hErr = std::bit_cast<HANDLE>(_get_osfhandle(_fileno(fErr)));
+	bool ret_value = false;
+	DWORD exitCode{};
+	std::string prog_path{};
+	STARTUPINFOA startupinfo{};
+	PROCESS_INFORMATION procinfo{};
+	std::string cmd_line{};
+	std::unique_ptr<char[]> mutable_cmd_line_buf{};
+
+	SECURITY_ATTRIBUTES sa{ .nLength{sizeof(sa)}, .lpSecurityDescriptor{nullptr}, .bInheritHandle{true} };
+
+	HANDLE hChildStdOut_read{ nullptr };
+	HANDLE hChildStdOut_write{ nullptr };
+	if (!CreatePipe(&hChildStdOut_read, &hChildStdOut_write, &sa, 0)) {
+		fmt::print(fErr, "Failed to create pipe\n");
+		goto cleanup;
+	}
+	{
+		auto prog_path_opt = GetProgPath(fErr);
+		if (!prog_path_opt.has_value()) {
+			goto cleanup;
+		}
+		prog_path = *prog_path_opt;
+	}
+	
+	startupinfo.cb = sizeof(startupinfo);
+
+	// startupinfo.hStdError  = g_hChildStd_OUT_Wr;
+	// startupinfo.hStdOutput = g_hChildStd_OUT_Wr;
+	// startupinfo.hStdInput  = g_hChildStd_IN_Rd;
+	// startupinfo.dwFlags   |= STARTF_USESTDHANDLES;
+
+	cmd_line = fmt::format("\"{0}\" --pid {1} --handle-out {2} --handle-err {2} --no-self-spawn",
+		prog_path, pid, reinterpret_cast<uintptr_t>(hChildStdOut_write));
+
+	mutable_cmd_line_buf = std::make_unique<char[]>(cmd_line.length() + 1);
+	std::memcpy(mutable_cmd_line_buf.get(), cmd_line.c_str(), cmd_line.length() * sizeof(char));
+	mutable_cmd_line_buf.get()[cmd_line.length()] = '\0';
 
 
-	fmt::print(fErr, "SpawnSelf() not implemented\n");
-	return false;
+	if (!CreateProcessA(prog_path.c_str(), mutable_cmd_line_buf.get(), nullptr, nullptr, true, 0, nullptr, nullptr, &startupinfo, &procinfo)) {
+		auto error = GetLastError();
+		fmt::print(fErr, "Couldn't create child process - {:#x} {}\n", error, get_error_message(error).value_or(""));
+		goto cleanup;
+	}
+	CloseHandle(procinfo.hThread);
+	procinfo.hThread = nullptr;
+
+	CloseHandle(hChildStdOut_write);
+	hChildStdOut_write = nullptr;
+
+	{
+		constexpr const DWORD BUFF_SIZE{ 512 };
+		char szBuffer[BUFF_SIZE]{};
+		constexpr const auto element_size{ sizeof(szBuffer[0]) };
+		static_assert(element_size == 1);
+
+		DWORD dwBytesRead{};
+		size_t bytesWritten{};
+		bool bRead{ false };
+
+		do {
+			bRead = ReadFile(hChildStdOut_read, szBuffer, BUFF_SIZE, &dwBytesRead, nullptr);
+			if (!bRead)
+				break;
+			if (dwBytesRead == 0)
+				break;
+			bytesWritten = fwrite(szBuffer, element_size, dwBytesRead / element_size, fOut);
+			if (bytesWritten != dwBytesRead) {
+				// error
+				goto cleanup;
+			}
+		} while (true);
+	}
+
+
+	WaitForSingleObject(procinfo.hProcess, INFINITE);
+
+	if (0 == GetExitCodeProcess(procinfo.hProcess, &exitCode)) {
+		fmt::print(fErr, "Failed to get Exit Code of Process.\n");
+		goto cleanup;
+	}
+
+	if (exitCode != 0) {
+		fmt::print(fErr, "Child process failed with exited code: {}", exitCode);
+		goto cleanup;
+	}
+
+	//hPipeListenerThread = reinterpret_cast<HANDLE>(_beginthread(PipeListener, 0, hPipeIn));
+	ret_value = true;
+cleanup:
+	if (procinfo.hProcess != nullptr) {
+		CloseHandle(procinfo.hProcess);
+		procinfo.hProcess = nullptr;
+	}
+	if (procinfo.hThread != nullptr) {
+		CloseHandle(procinfo.hThread);
+		procinfo.hThread = nullptr;
+	}
+
+	if (hChildStdOut_read) {
+		CloseHandle(hChildStdOut_read);
+		hChildStdOut_read = nullptr;
+	}
+	if (hChildStdOut_write) {
+		CloseHandle(hChildStdOut_write);
+		hChildStdOut_write = nullptr;
+	}
+		
+	return ret_value;
 }
 
 int main(int argc, const char **argv) {
+	_set_fmode(_O_BINARY);
+	_setmode(_fileno(stdout), _O_BINARY);
+	_setmode(_fileno(stdin), _O_BINARY);
 
 	if (argc <= 1) {
 		PrintInfo(stdout);
@@ -362,30 +501,35 @@ int main(int argc, const char **argv) {
 		}
 	}
 
+	int fdOut{};
 	FILE* fOut = stdout;
 	FILE* fErr = stderr;
 
 	if (handle_out) {
-		int fd = _open_osfhandle(handle_out.value(), 0);
-		if (fd == -1)
+		fdOut = _open_osfhandle(handle_out.value(), 0);
+		if (fdOut == -1)
 			return 1;
-		fOut = _fdopen(fd, "w");
+		fOut = _fdopen(fdOut, "w");
 		if (fOut == nullptr)
 			return 1;
 	}
 
 	if (handle_err) {
+		int fdErr{};
 		if (handle_out && *handle_out == *handle_err) {
-			fErr = fOut;
+			fdErr = _dup(fdOut);
+			if (fdErr == -1)
+				return 1;
 		}
 		else {
-			int fd = _open_osfhandle(handle_err.value(), 0);
-			if (fd == -1)
-				return 1;
-			fErr = _fdopen(fd, "w");
-			if (fOut == nullptr)
+			fdErr = _open_osfhandle(handle_err.value(), 0);
+			if (fdErr == -1)
 				return 1;
 		}
+		fErr = _fdopen(fdErr, "w");
+		if (fOut == nullptr)
+			return 1;
+		
 	}
 
 
@@ -395,7 +539,7 @@ int main(int argc, const char **argv) {
 				return 1;
 		}
 		else {
-			if (!SpawnSelf(fOut,fErr))
+			if (!SpawnSelf(fOut,fErr,*PID))
 				return 1;
 		}
 	}
