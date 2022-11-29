@@ -146,10 +146,57 @@ static bool is_handle_invalid(HANDLE h, bool strict = false) {
 	DWORD dummy;
 	return !GetHandleInformation(h, &dummy);
 }
+
+enum class console_in_or_out :uint32_t {
+	undefined,
+	in,
+	out
+};
 struct handle_with_name {
 	HANDLE handle{ nullptr };
 	std::string_view name{};
+	console_in_or_out type{ console_in_or_out::undefined };
 };
+
+
+void PrintConsoleMode(FILE* stream, std::string_view indent, DWORD mode, console_in_or_out type) {
+
+	auto lambda = [&]<size_t size>(std::string_view const (&array)[size]) ->void {
+		static_assert(size <= sizeof(mode)*8);
+		for (int i = 0; i < size && i < sizeof(mode) * 8; ++i) {
+			DWORD mask = DWORD(1u) << i;
+			bool set = mode & mask;
+			fmt::print(stream, "{0}{1} {2:#0{3}b}  {2:#0{4}x} {5}\n", 
+				indent, (set ? "set:  " : "unset:"), mask, sizeof(mode)*8+2, sizeof(mode) * 2 + 2, array[i]);
+		}
+	};
+
+	constexpr const std::string_view input_flags[]{
+		"ENABLE_PROCESSED_INPUT",              // 0x0001
+		"ENABLE_LINE_INPUT",                   // 0x0002
+		"ENABLE_ECHO_INPUT",                   // 0x0004
+		"ENABLE_WINDOW_INPUT",                 // 0x0008
+		"ENABLE_MOUSE_INPUT",                  // 0x0010
+		"ENABLE_INSERT_MODE",                  // 0x0020
+		"ENABLE_QUICK_EDIT_MODE",              // 0x0040
+		"ENABLE_EXTENDED_FLAGS",               // 0x0080
+		"ENABLE_AUTO_POSITION",                // 0x0100
+		"ENABLE_VIRTUAL_TERMINAL_INPUT",       // 0x0200
+	};
+	constexpr const std::string_view output_flags[]{
+		"ENABLE_PROCESSED_OUTPUT",             //0x0001
+		"ENABLE_WRAP_AT_EOL_OUTPUT",           //0x0002
+		"ENABLE_VIRTUAL_TERMINAL_PROCESSING",  //0x0004
+		"DISABLE_NEWLINE_AUTO_RETURN",         //0x0008
+		"ENABLE_LVB_GRID_WORLDWIDE",           //0x0010
+	};
+
+	if (type == console_in_or_out::in || type == console_in_or_out::undefined)
+		return lambda(input_flags);
+
+	if (type == console_in_or_out::out || type == console_in_or_out::undefined)
+		return lambda(output_flags);
+}
 
 void PrintMode(FILE*stream, handle_with_name h) {
 	if (is_handle_invalid(h.handle, true)) {
@@ -159,9 +206,10 @@ void PrintMode(FILE*stream, handle_with_name h) {
 		static_assert(sizeof(HANDLE) == sizeof(uintptr_t));
 
 		fmt::print(stream, "{}: {:#x}\n", h.name, std::bit_cast<uintptr_t>(h.handle));
-		DWORD console_output_mode{};
-		if (GetConsoleMode(h.handle, &console_output_mode)) {
-			fmt::print(stream, "  console mode: {:#0{}b}\n", console_output_mode, sizeof(console_output_mode) * 8 + 2);
+		DWORD console_mode{};
+		if (GetConsoleMode(h.handle, &console_mode)) {
+			fmt::print(stream,       "  console mode: {0:#0{1}b}  {0:#0{2}x}\n", console_mode, sizeof(console_mode) * 8 + 2, sizeof(console_mode) * 2 + 2);
+			PrintConsoleMode(stream, "         ", console_mode, h.type);
 		}
 		else {
 			auto error = GetLastError();
@@ -220,14 +268,15 @@ void PrintInfo(FILE*stream) {
 
 	handle_with_name hC_stdin{
 		.handle{reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(stdin)))},
-		.name{"stdin"}
+		.name{"stdin"},
+		.type{console_in_or_out::in},
 	};
 	PrintMode(stream, hC_stdin);
 
-	handle_with_name hStdIn{ .handle{ GetStdHandle(STD_INPUT_HANDLE)}, .name{"STD_INPUT_HANDLE"} };
+	handle_with_name hStdIn{ .handle{ GetStdHandle(STD_INPUT_HANDLE)}, .name{"STD_INPUT_HANDLE"}, .type{console_in_or_out::in}, };
 	PrintMode(stream, hStdIn);
 
-	handle_with_name hConIn{ .handle{nullptr}, .name{"CONIN$"} };
+	handle_with_name hConIn{ .handle{nullptr}, .name{"CONIN$"}, .type{console_in_or_out::in}, };
 	{
 		SECURITY_ATTRIBUTES sa{ .nLength{sizeof(sa)}, .lpSecurityDescriptor{nullptr}, .bInheritHandle{false} };
 		hConIn.handle = CreateFileA("CONIN$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, &sa, OPEN_EXISTING, 0, nullptr);
@@ -242,29 +291,33 @@ void PrintInfo(FILE*stream) {
 
 	handle_with_name hC_stdout{ 
 		.handle{reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(stdout)))}, 
-		.name{"stdout"}
+		.name{"stdout"},
+		.type{console_in_or_out::out},
 	};
 	PrintMode(stream, hC_stdout);
 
 	handle_with_name hC_stderr{
 		.handle{reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(stderr)))},
-		.name{"stderr"}
+		.name{"stderr"},
+		.type{console_in_or_out::out},
 	};
 	PrintMode(stream, hC_stderr);
 
 	handle_with_name hStdOut{ 
 		.handle{ GetStdHandle(STD_OUTPUT_HANDLE)}, 
-		.name{"STD_OUTPUT_HANDLE"}
+		.name{"STD_OUTPUT_HANDLE"},
+		.type{console_in_or_out::out},
 	};
 	PrintMode(stream, hStdOut);
 
 	handle_with_name hStdErr{
 		.handle {GetStdHandle(STD_ERROR_HANDLE)},
-		.name{"STD_ERROR_HANDLE"}
+		.name{"STD_ERROR_HANDLE"},
+		.type{console_in_or_out::out},
 	};
 	PrintMode(stream,  hStdErr);
 
-	handle_with_name hConOut{ .handle{nullptr}, .name{"CONOUT$"} };
+	handle_with_name hConOut{ .handle{nullptr}, .name{"CONOUT$"}, .type{console_in_or_out::out}, };
 	{
 		SECURITY_ATTRIBUTES sa{ .nLength{sizeof(sa)}, .lpSecurityDescriptor{nullptr}, .bInheritHandle{false} };
 		hConOut.handle = CreateFileA("CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, nullptr);
@@ -309,7 +362,7 @@ bool AttachToConsoleAndPrintInfo(FILE*stream, uint32_t PID) {
 	if (!AttachConsole(PID)) {
 		auto error = GetLastError();
 		auto message = get_error_message(error);
-		fmt::print(stream, "AttachConsole({}) failed with error {}{}{}\n", PID, error, quote_open, message.value_or(""), quote_close);
+		fmt::print(stream, "AttachConsole({}) failed with error {} - {}", PID, error, indent_message("  ", message.value_or("")));
 		return false;
 	}
 	fmt::print(stream, "Attached to console of process {}\n", PID);
