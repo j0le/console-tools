@@ -210,6 +210,11 @@ void PrintMode(FILE*stream, handle_with_name h) {
 		if (GetConsoleMode(h.handle, &console_mode)) {
 			fmt::print(stream,       "  console mode: {0:#0{1}b}  {0:#0{2}x}\n", console_mode, sizeof(console_mode) * 8 + 2, sizeof(console_mode) * 2 + 2);
 			PrintConsoleMode(stream, "         ", console_mode, h.type);
+			//if (h.type == console_in_or_out::in && false) {
+			//	DWORD new_mode = console_mode | ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT;
+			//	SetConsoleMode(h.handle, new_mode);
+			//	PrintConsoleMode(stream, "    n    ", new_mode, h.type);
+			//}
 		}
 		else {
 			auto error = GetLastError();
