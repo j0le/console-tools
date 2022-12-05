@@ -218,6 +218,7 @@ bool PrintMode(FILE* stream, handle_with_name h, set_and_reset<DWORD> s_n_r = se
 			//}
 			auto new_mode = s_n_r.change(console_mode);
 			if (new_mode != console_mode) {
+				fmt::print(stream, "  new mode {:#x}\n", new_mode);
 				if (SetConsoleMode(h.handle, new_mode)) {
 					PrintConsoleMode(stream, "  ", new_mode, h.type);
 				}
@@ -233,7 +234,7 @@ bool PrintMode(FILE* stream, handle_with_name h, set_and_reset<DWORD> s_n_r = se
 			auto error = GetLastError();
 			auto message = get_error_message(error);
 			fmt::print(stream, "  console mode: error {:#x} - {}", error, indent_message("    ", message.value_or("")));
-			ret = false;
+			//ret = false;
 		}
 
 		PrintFileType(stream, "  ", h.handle);
@@ -346,7 +347,7 @@ bool PrintInfo(FILE*stream, change_con_mode change_mode) {
 	{
 		SECURITY_ATTRIBUTES sa{ .nLength{sizeof(sa)}, .lpSecurityDescriptor{nullptr}, .bInheritHandle{false} };
 		hConOut.handle = CreateFileA("CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, nullptr);
-		ret = PrintMode(stream, hConOut, change_mode.conin) && ret;
+		ret = PrintMode(stream, hConOut, change_mode.conout) && ret;
 		TestWriteConsole(stream, hConOut.handle);
 	}
 

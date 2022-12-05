@@ -138,9 +138,11 @@ struct set_and_reset {
         constexpr T zero{ 0u };
         T set_ones = set_all_ones_to_one;
         T set_zeros = set_all_zeros_to_zero;
-        for (int i = 0; i < bits; ++i) {
+        for (int i = bits-1; i >= 0; i--) {
             bool make_one = one == (one & set_ones);
             bool make_zero = zero == (one & set_zeros);
+            set_ones >>= 1;
+            set_zeros >>= 1;
             if (make_one && make_zero)
                 return std::nullopt;
             if (make_one)
