@@ -370,7 +370,7 @@ void PrintUsage(FILE*stream) {
 	fmt::print(stream,
 		"Usage:\n"
 		"\n"
-		"  stty.exe [--pid <PID>] [--handle-out <handle-out>] [--no-self-spawn] \n"
+		"  stty.exe [--pid <PID>] [--handle-out <handle-out>] [--no-self-spawn] [--set-in-mode <mode>] [--set-out-mode <mode>]\n"
 	);
 }
 
