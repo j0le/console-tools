@@ -161,12 +161,13 @@ struct handle_with_name {
 
 void PrintConsoleMode(FILE* stream, std::string_view indent, DWORD mode, console_in_or_out type) {
 
+	fmt::print(stream, "{0}console mode: {1:#0{2}b}  {1:#0{3}x}\n", indent, mode, sizeof(mode) * 8 + 2, sizeof(mode) * 2 + 2);
 	auto lambda = [&]<size_t size>(std::string_view const (&array)[size]) ->void {
 		static_assert(size <= sizeof(mode)*8);
 		for (int i = 0; i < size && i < sizeof(mode) * 8; ++i) {
 			DWORD mask = DWORD(1u) << i;
 			bool set = mode & mask;
-			fmt::print(stream, "{0}{1} {2:#0{3}b}  {2:#0{4}x} {5}\n", 
+			fmt::print(stream, "{0}       {1} {2:#0{3}b}  {2:#0{4}x} {5}\n", 
 				indent, (set ? "set:  " : "unset:"), mask, sizeof(mode)*8+2, sizeof(mode) * 2 + 2, array[i]);
 		}
 	};
@@ -198,7 +199,8 @@ void PrintConsoleMode(FILE* stream, std::string_view indent, DWORD mode, console
 		return lambda(output_flags);
 }
 
-void PrintMode(FILE*stream, handle_with_name h) {
+bool PrintMode(FILE* stream, handle_with_name h, set_and_reset<DWORD> s_n_r = set_and_reset<DWORD>{}) {
+	bool ret{ true };
 	if (is_handle_invalid(h.handle, true)) {
 		fmt::print("{}: {:#x} invalid\n", h.name, std::bit_cast<uintptr_t>(h.handle));
 	}
@@ -208,22 +210,35 @@ void PrintMode(FILE*stream, handle_with_name h) {
 		fmt::print(stream, "{}: {:#x}\n", h.name, std::bit_cast<uintptr_t>(h.handle));
 		DWORD console_mode{};
 		if (GetConsoleMode(h.handle, &console_mode)) {
-			fmt::print(stream,       "  console mode: {0:#0{1}b}  {0:#0{2}x}\n", console_mode, sizeof(console_mode) * 8 + 2, sizeof(console_mode) * 2 + 2);
-			PrintConsoleMode(stream, "         ", console_mode, h.type);
+			PrintConsoleMode(stream, "  ", console_mode, h.type);
 			//if (h.type == console_in_or_out::in && false) {
 			//	DWORD new_mode = console_mode | ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT;
 			//	SetConsoleMode(h.handle, new_mode);
 			//	PrintConsoleMode(stream, "    n    ", new_mode, h.type);
 			//}
+			auto new_mode = s_n_r.change(console_mode);
+			if (new_mode != console_mode) {
+				if (SetConsoleMode(h.handle, new_mode)) {
+					PrintConsoleMode(stream, "  ", new_mode, h.type);
+				}
+				else {
+					auto error = GetLastError();
+					auto message = get_error_message(error);
+					fmt::print(stream, "  SetConsoleMode(): error {:#x} - {}", error, indent_message("    ", message.value_or("")));
+					ret = false;
+				}
+			}
 		}
 		else {
 			auto error = GetLastError();
 			auto message = get_error_message(error);
 			fmt::print(stream, "  console mode: error {:#x} - {}", error, indent_message("    ", message.value_or("")));
+			ret = false;
 		}
 
 		PrintFileType(stream, "  ", h.handle);
 	}
+	return ret;
 }
 
 void PrintComparison(FILE* stream, handle_with_name hn1, handle_with_name hn2) {
@@ -255,8 +270,13 @@ void TestWriteConsole(FILE*stream, HANDLE conout) {
 }
 
 
-void PrintInfo(FILE*stream) {
+struct change_con_mode{
+	set_and_reset<DWORD> conin{};
+	set_and_reset<DWORD> conout{};
+};
 
+bool PrintInfo(FILE*stream, change_con_mode change_mode) {
+	bool ret{ true };
 	fmt::print(stream, "DEBUG: äöü {}{}{}\n", quote_open, UTF_8_thumbs_up_with_skin_tone, quote_close);
 
 	UINT acp = GetACP();
@@ -276,16 +296,16 @@ void PrintInfo(FILE*stream) {
 		.name{"stdin"},
 		.type{console_in_or_out::in},
 	};
-	PrintMode(stream, hC_stdin);
+	ret = PrintMode(stream, hC_stdin) && ret;
 
 	handle_with_name hStdIn{ .handle{ GetStdHandle(STD_INPUT_HANDLE)}, .name{"STD_INPUT_HANDLE"}, .type{console_in_or_out::in}, };
-	PrintMode(stream, hStdIn);
+	ret = PrintMode(stream, hStdIn) && ret;
 
 	handle_with_name hConIn{ .handle{nullptr}, .name{"CONIN$"}, .type{console_in_or_out::in}, };
 	{
 		SECURITY_ATTRIBUTES sa{ .nLength{sizeof(sa)}, .lpSecurityDescriptor{nullptr}, .bInheritHandle{false} };
 		hConIn.handle = CreateFileA("CONIN$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, &sa, OPEN_EXISTING, 0, nullptr);
-		PrintMode(stream, hConIn);
+		ret = PrintMode(stream, hConIn, change_mode.conin) && ret;
 	}
 
 	fmt::print(stream, "\n");
@@ -299,34 +319,34 @@ void PrintInfo(FILE*stream) {
 		.name{"stdout"},
 		.type{console_in_or_out::out},
 	};
-	PrintMode(stream, hC_stdout);
+	ret = PrintMode(stream, hC_stdout) && ret;
 
 	handle_with_name hC_stderr{
 		.handle{reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(stderr)))},
 		.name{"stderr"},
 		.type{console_in_or_out::out},
 	};
-	PrintMode(stream, hC_stderr);
+	ret = PrintMode(stream, hC_stderr) && ret;
 
 	handle_with_name hStdOut{ 
 		.handle{ GetStdHandle(STD_OUTPUT_HANDLE)}, 
 		.name{"STD_OUTPUT_HANDLE"},
 		.type{console_in_or_out::out},
 	};
-	PrintMode(stream, hStdOut);
+	ret = PrintMode(stream, hStdOut) && ret;
 
 	handle_with_name hStdErr{
 		.handle {GetStdHandle(STD_ERROR_HANDLE)},
 		.name{"STD_ERROR_HANDLE"},
 		.type{console_in_or_out::out},
 	};
-	PrintMode(stream,  hStdErr);
+	ret = PrintMode(stream,  hStdErr) && ret;
 
 	handle_with_name hConOut{ .handle{nullptr}, .name{"CONOUT$"}, .type{console_in_or_out::out}, };
 	{
 		SECURITY_ATTRIBUTES sa{ .nLength{sizeof(sa)}, .lpSecurityDescriptor{nullptr}, .bInheritHandle{false} };
 		hConOut.handle = CreateFileA("CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, nullptr);
-		PrintMode(stream, hConOut);
+		ret = PrintMode(stream, hConOut, change_mode.conin) && ret;
 		TestWriteConsole(stream, hConOut.handle);
 	}
 
@@ -343,19 +363,20 @@ void PrintInfo(FILE*stream) {
 		CloseHandle(hConIn.handle);
 		hConIn.handle = nullptr;
 	}
+	return ret;
 }
 
 void PrintUsage(FILE*stream) {
 	fmt::print(stream,
-		"Usage:\""
+		"Usage:\n"
 		"\n"
 		"  stty.exe [--pid <PID>] [--handle-out <handle-out>] [--no-self-spawn] \n"
 	);
 }
 
-bool AttachToConsoleAndPrintInfo(FILE*stream, uint32_t PID) {
+bool AttachToConsoleAndPrintInfo(FILE*stream, uint32_t PID, change_con_mode change_mode) {
 	fmt::print(stream, "DEBUG: out before free&attach: {:#x}\n", std::bit_cast<uintptr_t>(GetStdHandle(STD_OUTPUT_HANDLE)));
-	PrintInfo(stream);
+	PrintInfo(stream, change_con_mode{});
 
 	if (!FreeConsole()) {
 		auto error = GetLastError();
@@ -371,12 +392,24 @@ bool AttachToConsoleAndPrintInfo(FILE*stream, uint32_t PID) {
 		return false;
 	}
 	fmt::print(stream, "Attached to console of process {}\n", PID);
+	//HWND hwnd = GetConsoleWindow();
+	//if (hwnd != NULL) {
+
+	//	if (!ShowWindow(hwnd, SW_SHOWNORMAL)) {
+	//		//auto error = GetLastError();
+	//		//auto message = get_error_message(error);
+	//		//fmt::print(stream, "ShowWindow() failed with error {} - {}", error, indent_message("  ", message.value_or("")));
+	//		//return false;
+	//	}
+	//}
+	////else {
+	////	fmt::print(stream, "GetConsoleWindow() returned NULL.\n");
+	////	return false;
+	////}
 
 
 	fmt::print(stream, "DEBUG: out after free&attach: {:#x}\n", std::bit_cast<uintptr_t>(GetStdHandle(STD_OUTPUT_HANDLE)));
-	PrintInfo(stream);
-
-	return true;
+	return PrintInfo(stream, change_mode);
 }
 
 std::optional<std::string> GetProgPath(FILE*streamErr) {
@@ -407,7 +440,7 @@ std::optional<std::string> GetProgPath(FILE*streamErr) {
 	return std::nullopt;
 }
 
-bool SpawnSelf(FILE* fOut, FILE *fErr, DWORD pid) {
+bool SpawnSelf(FILE* fOut, FILE* fErr, DWORD pid, change_con_mode change_mode) {
 
 	//HANDLE hOut = std::bit_cast<HANDLE>(_get_osfhandle(_fileno(fOut)));
 	//HANDLE hErr = std::bit_cast<HANDLE>(_get_osfhandle(_fileno(fErr)));
@@ -434,16 +467,27 @@ bool SpawnSelf(FILE* fOut, FILE *fErr, DWORD pid) {
 		}
 		prog_path = *prog_path_opt;
 	}
-	
+
 	startupinfo.cb = sizeof(startupinfo);
 
 	// startupinfo.hStdError  = g_hChildStd_OUT_Wr;
 	// startupinfo.hStdOutput = g_hChildStd_OUT_Wr;
 	// startupinfo.hStdInput  = g_hChildStd_IN_Rd;
 	// startupinfo.dwFlags   |= STARTF_USESTDHANDLES;
+	{
+		auto set_conin_str = change_mode.conin.to_string();
+		auto set_conout_str = change_mode.conout.to_string();
+		if (!set_conin_str ||!set_conout_str) {
+			fmt::print(fErr, "internal error");
+			goto cleanup;
+		}
 
-	cmd_line = fmt::format("\"{0}\" --pid {1} --handle-out {2} --handle-err {2} --no-self-spawn",
-		prog_path, pid, reinterpret_cast<uintptr_t>(hChildStdOut_write));
+
+		cmd_line = fmt::format("\"{0}\" --pid {1} --handle-out {2} --handle-err {2} --no-self-spawn --set-in-mode \"{3}\" --set-out-mode \"{4}\"",
+			prog_path, pid, reinterpret_cast<uintptr_t>(hChildStdOut_write),
+			*set_conin_str, *set_conout_str
+			);
+	}
 
 	mutable_cmd_line_buf = std::make_unique<char[]>(cmd_line.length() + 1);
 	std::memcpy(mutable_cmd_line_buf.get(), cmd_line.c_str(), cmd_line.length() * sizeof(char));
@@ -530,7 +574,8 @@ int main(int argc, const char **argv) {
 	_setmode(_fileno(stdin), _O_BINARY);
 
 	if (argc <= 1) {
-		PrintInfo(stdout);
+		if (!PrintInfo(stdout, change_con_mode{}))
+			return 1;
 		return 0;
 	}
 	if (GetACP() != 65001) {
@@ -554,6 +599,7 @@ int main(int argc, const char **argv) {
 	std::optional<intptr_t> handle_out{ std::nullopt };
 	std::optional<intptr_t> handle_err{ std::nullopt };
 	bool no_self_spawn{ false };
+	change_con_mode change_mode{};
 
 	for (int i = 1; i < argc; ++i) {
 		std::string_view current_arg{ argv[i] };
@@ -614,6 +660,36 @@ int main(int argc, const char **argv) {
 			}
 			handle_err = std::bit_cast<intptr_t>(opt_uint.value());
 		}
+		else if (current_arg == "--set-in-mode") {
+			if (!next_arg) {
+				fmt::print(stderr, "Missing value for option \"--set-in-mode\"\n");
+				PrintUsage(stderr);
+				return 1;
+			}
+			i += 1;
+			auto opt_in_mode = parse_set_and_reset_string<DWORD>(*next_arg);
+			if (!opt_in_mode) {
+				fmt::print(stderr, "value for option \"--set-in-mode\" is in the wrong format.\n");
+				PrintUsage(stderr);
+				return 1;
+			}
+			change_mode.conin = *opt_in_mode;
+		}
+		else if (current_arg == "--set-out-mode") {
+			if (!next_arg) {
+				fmt::print(stderr, "Missing value for option \"--set-out-mode\"\n");
+				PrintUsage(stderr);
+				return 1;
+			}
+			i += 1;
+			auto opt_out_mode = parse_set_and_reset_string<DWORD>(*next_arg);
+			if (!opt_out_mode) {
+				fmt::print(stderr, "value for option \"--set-in-mode\" is in the wrong format.\n");
+				PrintUsage(stderr);
+				return 1;
+			}
+			change_mode.conout = *opt_out_mode;
+		}
 		else {
 			fmt::print(stderr, "Argument {}{}{} could not be interpreted\n", quote_open, current_arg, quote_close);
 			PrintUsage(stderr);
@@ -655,16 +731,17 @@ int main(int argc, const char **argv) {
 
 	if (PID.has_value()) {
 		if (no_self_spawn) {
-			if (!AttachToConsoleAndPrintInfo(fOut, *PID))
+			if (!AttachToConsoleAndPrintInfo(fOut, *PID, change_mode))
 				return 1;
 		}
 		else {
-			if (!SpawnSelf(fOut,fErr,*PID))
+			if (!SpawnSelf(fOut,fErr,*PID, change_mode))
 				return 1;
 		}
 	}
 	else {
-		PrintInfo(fOut);
+		if(!PrintInfo(fOut, change_mode))
+			return 1;
 	}
 
 	return 0;

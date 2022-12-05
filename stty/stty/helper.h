@@ -110,3 +110,72 @@ constexpr std::optional<HANDLE> string_to_HANDLE(const std::string_view& str) {
     
     return std::bit_cast<HANDLE>(*uint_opt);
 }
+
+
+
+template<class T>
+struct set_and_reset {
+    static_assert(std::is_unsigned_v<T>);
+    T set_all_ones_to_one{ 0u };
+    T set_all_zeros_to_zero{ std::numeric_limits<T>::max() };
+
+    T change(T v) {
+        v |= set_all_ones_to_one;
+        v &= set_all_zeros_to_zero;
+        return v;
+    }
+
+    bool unchanging() {
+        constexpr set_and_reset default_value{};
+        return set_all_ones_to_one == default_value.set_all_ones_to_one 
+            && set_all_zeros_to_zero == default_value.set_all_zeros_to_zero;
+    }
+
+    std::optional<std::string> to_string() const {
+        constexpr std::size_t bits{ sizeof(T) * 8 };
+        std::string ret(bits, '.');
+        constexpr T one{ 1u };
+        constexpr T zero{ 0u };
+        T set_ones = set_all_ones_to_one;
+        T set_zeros = set_all_zeros_to_zero;
+        for (int i = 0; i < bits; ++i) {
+            bool make_one = one == (one & set_ones);
+            bool make_zero = zero == (one & set_zeros);
+            if (make_one && make_zero)
+                return std::nullopt;
+            if (make_one)
+                ret[i] = '1';
+            if (make_zero)
+                ret[i] = '0';
+        }
+        return ret;
+    }
+};
+
+
+template<class T>
+std::optional<set_and_reset<T>> parse_set_and_reset_string(std::string_view str) {
+    static_assert(std::is_unsigned_v<T>);
+    constexpr std::size_t bits{ sizeof(T) * 8 };
+    if (str.length() > bits)
+        return std::nullopt;
+
+    constexpr T one{ 1u };
+
+    set_and_reset<T> ret{0u,0u};
+    for (char c : str) {
+        ret.set_all_ones_to_one <<= 1;
+        ret.set_all_zeros_to_zero <<= 1;
+        if (c == '1') {
+            ret.set_all_ones_to_one |= one;
+        }
+        else if (c == '0') {
+            ret.set_all_zeros_to_zero |= one;
+        }
+        else if (c != '.') {
+            return std::nullopt;
+        }
+    }
+    ret.set_all_zeros_to_zero = ~ret.set_all_zeros_to_zero;
+    return ret;
+}
