@@ -5,6 +5,8 @@ VisualStudioVersion = 17.4.33103.184
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "stty", "stty\stty.vcxproj", "{4F138457-1141-486D-A75B-1F2C0BF50AC5}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "pipe_to_con", "pipe_to_con\pipe_to_con.vcxproj", "{DD078802-1E07-4E82-8A1A-600EC084786B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -21,6 +23,14 @@ Global
 		{4F138457-1141-486D-A75B-1F2C0BF50AC5}.Release|x64.Build.0 = Release|x64
 		{4F138457-1141-486D-A75B-1F2C0BF50AC5}.Release|x86.ActiveCfg = Release|Win32
 		{4F138457-1141-486D-A75B-1F2C0BF50AC5}.Release|x86.Build.0 = Release|Win32
+		{DD078802-1E07-4E82-8A1A-600EC084786B}.Debug|x64.ActiveCfg = Debug|x64
+		{DD078802-1E07-4E82-8A1A-600EC084786B}.Debug|x64.Build.0 = Debug|x64
+		{DD078802-1E07-4E82-8A1A-600EC084786B}.Debug|x86.ActiveCfg = Debug|Win32
+		{DD078802-1E07-4E82-8A1A-600EC084786B}.Debug|x86.Build.0 = Debug|Win32
+		{DD078802-1E07-4E82-8A1A-600EC084786B}.Release|x64.ActiveCfg = Release|x64
+		{DD078802-1E07-4E82-8A1A-600EC084786B}.Release|x64.Build.0 = Release|x64
+		{DD078802-1E07-4E82-8A1A-600EC084786B}.Release|x86.ActiveCfg = Release|Win32
+		{DD078802-1E07-4E82-8A1A-600EC084786B}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
