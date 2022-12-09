@@ -160,15 +160,24 @@ struct handle_with_name {
 
 
 void PrintConsoleMode(FILE* stream, std::string_view indent, DWORD mode, console_in_or_out type) {
+	constexpr std::size_t bits = sizeof(mode) * 8;
 
 	fmt::print(stream, "{0}console mode: {1:#0{2}b}  {1:#0{3}x}\n", indent, mode, sizeof(mode) * 8 + 2, sizeof(mode) * 2 + 2);
 	auto lambda = [&]<size_t size>(std::string_view const (&array)[size]) ->void {
-		static_assert(size <= sizeof(mode)*8);
-		for (int i = 0; i < size && i < sizeof(mode) * 8; ++i) {
+		static_assert(size <= bits);
+		for (int i = 0; i < size && i < bits; ++i) {
 			DWORD mask = DWORD(1u) << i;
 			bool set = mode & mask;
-			fmt::print(stream, "{0}       {1} {2:#0{3}b}  {2:#0{4}x} {5}\n", 
-				indent, (set ? "set:  " : "unset:"), mask, sizeof(mode)*8+2, sizeof(mode) * 2 + 2, array[i]);
+			auto pre_space  = bits - 1 - i;
+			auto post_space = i;
+			fmt::print(stream, "{0}                {1}{2}{3}  {4:#0{5}x} {6}\n",
+				indent,
+				std::string(pre_space, ' '),
+				set ? '1' : '.',
+				std::string(post_space, ' '),
+				mask,
+				sizeof(mode) * 2 + 2,
+				array[i]);
 		}
 	};
 
@@ -211,11 +220,6 @@ bool PrintMode(FILE* stream, handle_with_name h, set_and_reset<DWORD> s_n_r = se
 		DWORD console_mode{};
 		if (GetConsoleMode(h.handle, &console_mode)) {
 			PrintConsoleMode(stream, "  ", console_mode, h.type);
-			//if (h.type == console_in_or_out::in && false) {
-			//	DWORD new_mode = console_mode | ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT;
-			//	SetConsoleMode(h.handle, new_mode);
-			//	PrintConsoleMode(stream, "    n    ", new_mode, h.type);
-			//}
 			auto new_mode = s_n_r.change(console_mode);
 			if (new_mode != console_mode) {
 				fmt::print(stream, "  new mode {:#x}\n", new_mode);
@@ -276,7 +280,7 @@ struct change_con_mode{
 	set_and_reset<DWORD> conout{};
 };
 
-bool PrintInfo(FILE*stream, change_con_mode change_mode) {
+bool PrintInfo(FILE*stream, change_con_mode change_mode, bool more_info = false) {
 	bool ret{ true };
 	fmt::print(stream, "DEBUG: äöü {}{}{}\n", quote_open, UTF_8_thumbs_up_with_skin_tone, quote_close);
 
@@ -288,19 +292,25 @@ bool PrintInfo(FILE*stream, change_con_mode change_mode) {
 	fmt::print(stream, "OEM CP:            {}\n", oem_cp);
 	fmt::print(stream, "Console Input CP:  {}\n", console_input_cp);
 	fmt::print(stream, "Console Output CP: {}\n", console_output_cp);
+	fmt::print(stream, "\n");
 
 	// -----------------------
-	fmt::print(stream, "\n\nIN:\n\n");
+	if (more_info)
+		fmt::print(stream, "\nIN:\n\n");
 
 	handle_with_name hC_stdin{
 		.handle{reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(stdin)))},
 		.name{"stdin"},
 		.type{console_in_or_out::in},
 	};
-	ret = PrintMode(stream, hC_stdin) && ret;
+
+	if (more_info)
+		ret = PrintMode(stream, hC_stdin) && ret;
 
 	handle_with_name hStdIn{ .handle{ GetStdHandle(STD_INPUT_HANDLE)}, .name{"STD_INPUT_HANDLE"}, .type{console_in_or_out::in}, };
-	ret = PrintMode(stream, hStdIn) && ret;
+
+	if (more_info)
+		ret = PrintMode(stream, hStdIn) && ret;
 
 	handle_with_name hConIn{ .handle{nullptr}, .name{"CONIN$"}, .type{console_in_or_out::in}, };
 	{
@@ -309,51 +319,61 @@ bool PrintInfo(FILE*stream, change_con_mode change_mode) {
 		ret = PrintMode(stream, hConIn, change_mode.conin) && ret;
 	}
 
-	fmt::print(stream, "\n");
-	CompareEveryThing(stream, std::vector{ hC_stdin, hStdIn, hConIn });
 
+	if (more_info) {
+		fmt::print(stream, "\n");
+		CompareEveryThing(stream, std::vector{ hC_stdin, hStdIn, hConIn });
+	}
+
+	fmt::print(stream, "\n");
 	// -----------------------
-	fmt::print(stream, "\n\nOUT:\n\n");
+	if (more_info)
+		fmt::print(stream, "\nOUT:\n\n");
 
 	handle_with_name hC_stdout{ 
 		.handle{reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(stdout)))}, 
 		.name{"stdout"},
 		.type{console_in_or_out::out},
 	};
-	ret = PrintMode(stream, hC_stdout) && ret;
+	if (more_info)
+		ret = PrintMode(stream, hC_stdout) && ret;
 
 	handle_with_name hC_stderr{
 		.handle{reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(stderr)))},
 		.name{"stderr"},
 		.type{console_in_or_out::out},
 	};
-	ret = PrintMode(stream, hC_stderr) && ret;
+	if (more_info)
+		ret = PrintMode(stream, hC_stderr) && ret;
 
 	handle_with_name hStdOut{ 
 		.handle{ GetStdHandle(STD_OUTPUT_HANDLE)}, 
 		.name{"STD_OUTPUT_HANDLE"},
 		.type{console_in_or_out::out},
 	};
-	ret = PrintMode(stream, hStdOut) && ret;
+	if (more_info)
+		ret = PrintMode(stream, hStdOut) && ret;
 
 	handle_with_name hStdErr{
 		.handle {GetStdHandle(STD_ERROR_HANDLE)},
 		.name{"STD_ERROR_HANDLE"},
 		.type{console_in_or_out::out},
 	};
-	ret = PrintMode(stream,  hStdErr) && ret;
+	if (more_info)
+		ret = PrintMode(stream,  hStdErr) && ret;
 
 	handle_with_name hConOut{ .handle{nullptr}, .name{"CONOUT$"}, .type{console_in_or_out::out}, };
 	{
 		SECURITY_ATTRIBUTES sa{ .nLength{sizeof(sa)}, .lpSecurityDescriptor{nullptr}, .bInheritHandle{false} };
 		hConOut.handle = CreateFileA("CONOUT$", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, nullptr);
 		ret = PrintMode(stream, hConOut, change_mode.conout) && ret;
-		TestWriteConsole(stream, hConOut.handle);
+		//TestWriteConsole(stream, hConOut.handle);
 	}
 
-	fmt::print(stream,"\n");
-
-	CompareEveryThing(stream, std::vector{hC_stdout, hC_stderr, hStdOut, hStdErr, hConOut});
+	if (more_info) {
+		fmt::print(stream, "\n");
+		CompareEveryThing(stream, std::vector{ hC_stdout, hC_stderr, hStdOut, hStdErr, hConOut });
+	}
 
 	if (!is_handle_invalid(hConOut.handle)) {
 		CloseHandle(hConOut.handle);
@@ -376,9 +396,6 @@ void PrintUsage(FILE*stream) {
 }
 
 bool AttachToConsoleAndPrintInfo(FILE*stream, uint32_t PID, change_con_mode change_mode) {
-	fmt::print(stream, "DEBUG: out before free&attach: {:#x}\n", std::bit_cast<uintptr_t>(GetStdHandle(STD_OUTPUT_HANDLE)));
-	PrintInfo(stream, change_con_mode{});
-
 	if (!FreeConsole()) {
 		auto error = GetLastError();
 		auto message = get_error_message(error);
@@ -408,8 +425,6 @@ bool AttachToConsoleAndPrintInfo(FILE*stream, uint32_t PID, change_con_mode chan
 	////	return false;
 	////}
 
-
-	fmt::print(stream, "DEBUG: out after free&attach: {:#x}\n", std::bit_cast<uintptr_t>(GetStdHandle(STD_OUTPUT_HANDLE)));
 	return PrintInfo(stream, change_mode);
 }
 
