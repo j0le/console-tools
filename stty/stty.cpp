@@ -270,7 +270,7 @@ void CompareEveryThing(FILE* stream, std::vector<handle_with_name> handles) {
 void TestWriteConsole(FILE*stream, HANDLE conout) {
 	constexpr const std::wstring_view wsv = L"Moin Moin\n";
 	DWORD written;
-	bool success = WriteConsoleW(conout, wsv.data(), wsv.size(), &written, nullptr);
+	bool success = WriteConsoleW(conout, wsv.data(), static_cast<DWORD>(wsv.size()), &written, nullptr);
 	fmt::print(stream, "  WriteConsoleW result: {}\n", success?"success":"fail");
 }
 
