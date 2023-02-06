@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <bit>
+#include <variant>
 
 #include <Windows.h>
 
@@ -16,7 +17,16 @@ constexpr std::string_view quote_close{ "\xC2\xAB" }; // << U+00AB
 #include <type_traits>
 #include <limits>
 
+class error_t {};
 
+template<class other>
+using error_or = std::variant<error_t, other>;
+
+
+enum class ConsoleCtrlEvent : DWORD {
+    ctrl_c_event = CTRL_C_EVENT,
+    ctrl_break_event = CTRL_BREAK_EVENT
+};
 
 
 template<class uint_type, std::size_t max_number_of_digits>
@@ -181,3 +191,9 @@ std::optional<set_and_reset<T>> parse_set_and_reset_string(std::string_view str)
     ret.set_all_zeros_to_zero = ~ret.set_all_zeros_to_zero;
     return ret;
 }
+
+
+
+error_or<std::optional<ConsoleCtrlEvent>> parse_event_string(std::string_view event_name);
+
+std::string event_to_string(std::optional<ConsoleCtrlEvent> event);

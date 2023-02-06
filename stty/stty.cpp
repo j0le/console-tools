@@ -5,6 +5,7 @@
 #include <optional>
 #include <cstdint>
 #include <thread>
+#include <chrono>
 #include <sstream>
 #include <memory>
 #include <io.h>
@@ -391,11 +392,62 @@ void PrintUsage(FILE*stream) {
 	fmt::print(stream,
 		"Usage:\n"
 		"\n"
-		"  stty.exe [--pid <PID>] [--handle-out <handle-out>] [--no-self-spawn] [--set-in-mode <mode>] [--set-out-mode <mode>]\n"
+		"  stty.exe [--pid <PID>] [--handle-out <handle-out>] [--no-self-spawn] [--set-in-mode <mode>] [--set-out-mode <mode>] [--generate-event <event>]\n"
+		"\n"
+		"<mode>    A string of dots (.), zeros (0), and ones (1).\n"
+		"          A dot means no change\n"
+		"          A zero sets the bit to zero\n"
+		"          A one sets the bit to one\n"
+		"\n"
+		"<event>   One of these (without quotes):\n"
+		"          - \"ctrl-c\"\n"
+		"          - \"ctrl-break\"\n"
+		"          - \"none\"\n"
 	);
 }
 
-bool AttachToConsoleAndPrintInfo(FILE*stream, uint32_t PID, change_con_mode change_mode) {
+bool g_ctrl_event_handled{ false };
+
+BOOL WINAPI HandleCtrlEvent(
+	_In_ DWORD dwCtrlType
+) {
+	switch (dwCtrlType) {
+	case CTRL_C_EVENT:
+	case CTRL_BREAK_EVENT:
+		g_ctrl_event_handled = true;
+		return TRUE;
+	default:
+		return FALSE;
+	}
+}
+bool GenerateCtrlEvent(FILE* stream, ConsoleCtrlEvent event) {
+	bool handler_set{ false };
+	bool ret{ true };
+	if (!(handler_set = SetConsoleCtrlHandler(&HandleCtrlEvent, TRUE)))
+	{
+		fmt::print(stream,"Warning: SetConsoleCtrlHandler() failed. This process might exit abnormaly.\n");
+	}
+
+	auto dw_event = static_cast<DWORD>(event);
+
+	fmt::print(stream, "generate event {}\n", dw_event);
+	if (!GenerateConsoleCtrlEvent(dw_event, 0)) {
+		auto error = GetLastError();
+		auto message = get_error_message(error);
+		fmt::print(stream, "GenerateConsoleCtrlEvent({}) failed with error {} - {}", dw_event,  error, indent_message("  ", message.value_or("")));
+		ret = false;
+	}
+
+	if (handler_set) {
+		using namespace ::std::chrono_literals;
+		while (!g_ctrl_event_handled) std::this_thread::sleep_for(10ms);
+
+		(void)SetConsoleCtrlHandler(&HandleCtrlEvent, FALSE);
+	}
+	return ret;
+}
+
+bool AttachToConsoleAndPrintInfo(FILE*stream, uint32_t PID, change_con_mode change_mode, std::optional<ConsoleCtrlEvent> generate_event) {
 	if (!FreeConsole()) {
 		auto error = GetLastError();
 		auto message = get_error_message(error);
@@ -425,7 +477,14 @@ bool AttachToConsoleAndPrintInfo(FILE*stream, uint32_t PID, change_con_mode chan
 	////	return false;
 	////}
 
-	return PrintInfo(stream, change_mode);
+	bool result = PrintInfo(stream, change_mode);
+
+	if (generate_event.has_value()) {
+		fmt::print(stream, "\n");
+		result = result && GenerateCtrlEvent(stream, *generate_event);
+	}
+
+	return result;
 }
 
 std::optional<std::string> GetProgPath(FILE*streamErr) {
@@ -456,7 +515,7 @@ std::optional<std::string> GetProgPath(FILE*streamErr) {
 	return std::nullopt;
 }
 
-bool SpawnSelf(FILE* fOut, FILE* fErr, DWORD pid, change_con_mode change_mode) {
+bool SpawnSelf(FILE* fOut, FILE* fErr, DWORD pid, change_con_mode change_mode, std::optional<ConsoleCtrlEvent> generate_event) {
 
 	//HANDLE hOut = std::bit_cast<HANDLE>(_get_osfhandle(_fileno(fOut)));
 	//HANDLE hErr = std::bit_cast<HANDLE>(_get_osfhandle(_fileno(fErr)));
@@ -499,9 +558,10 @@ bool SpawnSelf(FILE* fOut, FILE* fErr, DWORD pid, change_con_mode change_mode) {
 		}
 
 
-		cmd_line = fmt::format("\"{0}\" --pid {1} --handle-out {2} --handle-err {2} --no-self-spawn --set-in-mode \"{3}\" --set-out-mode \"{4}\"",
+		cmd_line = fmt::format("\"{0}\" --pid {1} --handle-out {2} --handle-err {2} " 
+			"--no-self-spawn --set-in-mode \"{3}\" --set-out-mode \"{4}\" --generate-event \"{5}\"",
 			prog_path, pid, reinterpret_cast<uintptr_t>(hChildStdOut_write),
-			*set_conin_str, *set_conout_str
+			*set_conin_str, *set_conout_str, event_to_string(generate_event)
 			);
 	}
 
@@ -616,6 +676,7 @@ int main(int argc, const char **argv) {
 	std::optional<intptr_t> handle_err{ std::nullopt };
 	bool no_self_spawn{ false };
 	change_con_mode change_mode{};
+	std::optional<ConsoleCtrlEvent> generate_event{ std::nullopt };
 
 	for (int i = 1; i < argc; ++i) {
 		std::string_view current_arg{ argv[i] };
@@ -706,6 +767,22 @@ int main(int argc, const char **argv) {
 			}
 			change_mode.conout = *opt_out_mode;
 		}
+		else if (current_arg == "--generate-event") {
+			if (!next_arg) {
+				fmt::print(stderr, "Missing value for option \"--generate-event\"\n");
+				PrintUsage(stderr);
+				return 1;
+			}
+			i += 1;
+
+			auto event_or_error = parse_event_string(*next_arg);
+			if (std::holds_alternative<error_t>(event_or_error)) {
+				fmt::print(stderr, "value for option \"--generate-event\" wrong.\n");
+				PrintUsage(stderr);
+				return 1;
+			}
+			generate_event = std::get<decltype(generate_event)>(event_or_error);
+		}
 		else {
 			fmt::print(stderr, "Argument {}{}{} could not be interpreted\n", quote_open, current_arg, quote_close);
 			PrintUsage(stderr);
@@ -747,11 +824,11 @@ int main(int argc, const char **argv) {
 
 	if (PID.has_value()) {
 		if (no_self_spawn) {
-			if (!AttachToConsoleAndPrintInfo(fOut, *PID, change_mode))
+			if (!AttachToConsoleAndPrintInfo(fOut, *PID, change_mode, generate_event))
 				return 1;
 		}
 		else {
-			if (!SpawnSelf(fOut,fErr,*PID, change_mode))
+			if (!SpawnSelf(fOut,fErr,*PID, change_mode, generate_event))
 				return 1;
 		}
 	}
