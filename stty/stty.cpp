@@ -425,7 +425,7 @@ BOOL WINAPI HandleCtrlEvent(
 		return FALSE;
 	}
 }
-bool GenerateCtrlEvent(FILE* stream, ConsoleCtrlEvent event, std::optional<DWORD> process_group_id_opt) {
+bool GenerateCtrlEvent(FILE* stream, generate_event_info event_info, std::optional<DWORD> PID) {
 	bool handler_set{ false };
 	bool ret{ true };
 	if (!(handler_set = SetConsoleCtrlHandler(&HandleCtrlEvent, TRUE)))
@@ -433,10 +433,18 @@ bool GenerateCtrlEvent(FILE* stream, ConsoleCtrlEvent event, std::optional<DWORD
 		fmt::print(stream,"Warning: SetConsoleCtrlHandler() failed. This process might exit abnormaly.\n");
 	}
 
-	auto dw_event = static_cast<DWORD>(event);
-	static_assert(std::is_same_v <decltype(dw_event), std::underlying_type_t<decltype(event)>>);
+	auto dw_event = static_cast<DWORD>(event_info.event);
+	static_assert(std::is_same_v <decltype(dw_event), std::underlying_type_t<decltype(event_info.event)>>);
 
-	DWORD pgid = process_group_id_opt.value_or(static_cast<DWORD>(0u));
+	constexpr DWORD default_pgid = 0;
+	DWORD pgid = default_pgid;
+	if (event_info.use_pid_as_group_id) {
+		if (PID.has_value())
+			pgid = *PID;
+		else {
+			fmt::print(stream, "Warning: Cannot use PID as process group ID (PGID), because no PID is specified\n");
+		}
+	}
 
 	fmt::print(stream, "generate event {}\n", dw_event);
 	if (!GenerateConsoleCtrlEvent(dw_event, pgid)) {
@@ -869,16 +877,8 @@ int main(int argc, const char **argv) {
 
 	if (event_info.has_value()) {
 		fmt::print(fOut, "\n");
-		std::optional<DWORD> pid_opt{};
-		if (event_info->use_pid_as_group_id) {
-			if (PID.has_value())
-				pid_opt.emplace(static_cast<DWORD>(*PID));
-			else {
-				fmt::print(fOut, "Warning: Cannot use PID as process group ID (PGID), because no PID is specified\n");
-			}
 
-		}
-		update_success(GenerateCtrlEvent(fOut, event_info->event, pid_opt));
+		update_success(GenerateCtrlEvent(fOut, *event_info, PID));
 	}
 
 	return success ? 0 : 1;
