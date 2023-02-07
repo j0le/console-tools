@@ -456,6 +456,7 @@ bool GenerateCtrlEvent(FILE* stream, generate_event_info event_info, std::option
 
 	if (handler_set) {
 		using namespace ::std::chrono_literals;
+		// FIXME: Add option, that specifies, if we should wait for the event, if we specify a specific group ID when generating the event.
 		for (int i = 0; i < 100 && !g_ctrl_event_handled && ret; ++i) 
 			std::this_thread::sleep_for(10ms);
 
