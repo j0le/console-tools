@@ -392,7 +392,7 @@ void PrintUsage(FILE*stream) {
 	fmt::print(stream,
 		"Usage:\n"
 		"\n"
-		"  stty.exe [--pid <PID>] [--handle-out <handle-out>] [--no-self-spawn] [--set-in-mode <mode>] [--set-out-mode <mode>] [--generate-event <event>]\n"
+		"  stty.exe [--pid <PID>] [--handle-out <handle-out>] [--no-self-spawn] [--set-in-mode <mode>] [--set-out-mode <mode>] [--generate-event <event> [--use-pid-as-gid]]\n"
 		"\n"
 		"<mode>    A string of dots (.), zeros (0), and ones (1).\n"
 		"          A dot means no change\n"
@@ -405,6 +405,11 @@ void PrintUsage(FILE*stream) {
 		"          - \"none\"\n"
 	);
 }
+
+struct generate_event_info {
+	ConsoleCtrlEvent event{};
+	bool use_pid_as_group_id{ false };
+};
 
 bool g_ctrl_event_handled{ false };
 
@@ -420,7 +425,7 @@ BOOL WINAPI HandleCtrlEvent(
 		return FALSE;
 	}
 }
-bool GenerateCtrlEvent(FILE* stream, ConsoleCtrlEvent event) {
+bool GenerateCtrlEvent(FILE* stream, ConsoleCtrlEvent event, std::optional<DWORD> process_group_id_opt) {
 	bool handler_set{ false };
 	bool ret{ true };
 	if (!(handler_set = SetConsoleCtrlHandler(&HandleCtrlEvent, TRUE)))
@@ -429,9 +434,12 @@ bool GenerateCtrlEvent(FILE* stream, ConsoleCtrlEvent event) {
 	}
 
 	auto dw_event = static_cast<DWORD>(event);
+	static_assert(std::is_same_v <decltype(dw_event), std::underlying_type_t<decltype(event)>>);
+
+	DWORD pgid = process_group_id_opt.value_or(static_cast<DWORD>(0u));
 
 	fmt::print(stream, "generate event {}\n", dw_event);
-	if (!GenerateConsoleCtrlEvent(dw_event, 0)) {
+	if (!GenerateConsoleCtrlEvent(dw_event, pgid)) {
 		auto error = GetLastError();
 		auto message = get_error_message(error);
 		fmt::print(stream, "GenerateConsoleCtrlEvent({}) failed with error {} - {}", dw_event,  error, indent_message("  ", message.value_or("")));
@@ -447,7 +455,7 @@ bool GenerateCtrlEvent(FILE* stream, ConsoleCtrlEvent event) {
 	return ret;
 }
 
-bool AttachToConsoleAndPrintInfo(FILE*stream, uint32_t PID, change_con_mode change_mode, std::optional<ConsoleCtrlEvent> generate_event) {
+bool AttachToConsole(FILE*stream, uint32_t PID, change_con_mode change_mode) {
 	if (!FreeConsole()) {
 		auto error = GetLastError();
 		auto message = get_error_message(error);
@@ -476,15 +484,7 @@ bool AttachToConsoleAndPrintInfo(FILE*stream, uint32_t PID, change_con_mode chan
 	////	fmt::print(stream, "GetConsoleWindow() returned NULL.\n");
 	////	return false;
 	////}
-
-	bool result = PrintInfo(stream, change_mode);
-
-	if (generate_event.has_value()) {
-		fmt::print(stream, "\n");
-		result = result && GenerateCtrlEvent(stream, *generate_event);
-	}
-
-	return result;
+	return true;
 }
 
 std::optional<std::string> GetProgPath(FILE*streamErr) {
@@ -515,7 +515,7 @@ std::optional<std::string> GetProgPath(FILE*streamErr) {
 	return std::nullopt;
 }
 
-bool SpawnSelf(FILE* fOut, FILE* fErr, DWORD pid, change_con_mode change_mode, std::optional<ConsoleCtrlEvent> generate_event) {
+bool SpawnSelf(FILE* fOut, FILE* fErr, DWORD pid, change_con_mode change_mode, std::optional<generate_event_info> event_info) {
 
 	//HANDLE hOut = std::bit_cast<HANDLE>(_get_osfhandle(_fileno(fOut)));
 	//HANDLE hErr = std::bit_cast<HANDLE>(_get_osfhandle(_fileno(fErr)));
@@ -556,12 +556,15 @@ bool SpawnSelf(FILE* fOut, FILE* fErr, DWORD pid, change_con_mode change_mode, s
 			fmt::print(fErr, "internal error");
 			goto cleanup;
 		}
-
+		std::string generate_event_str{};
+		if (event_info.has_value()) {
+			generate_event_str = fmt::format(" --generate-event \"{}\"{}", event_to_string(event_info->event), (event_info->use_pid_as_group_id ? " --use-pid-as-gid" : ""));
+		}
 
 		cmd_line = fmt::format("\"{0}\" --pid {1} --handle-out {2} --handle-err {2} " 
-			"--no-self-spawn --set-in-mode \"{3}\" --set-out-mode \"{4}\" --generate-event \"{5}\"",
+			"--no-self-spawn --set-in-mode \"{3}\" --set-out-mode \"{4}\"{5}",
 			prog_path, pid, reinterpret_cast<uintptr_t>(hChildStdOut_write),
-			*set_conin_str, *set_conout_str, event_to_string(generate_event)
+			*set_conin_str, *set_conout_str, generate_event_str
 			);
 	}
 
@@ -676,7 +679,7 @@ int main(int argc, const char **argv) {
 	std::optional<intptr_t> handle_err{ std::nullopt };
 	bool no_self_spawn{ false };
 	change_con_mode change_mode{};
-	std::optional<ConsoleCtrlEvent> generate_event{ std::nullopt };
+	std::optional<generate_event_info> event_info{ std::nullopt };
 
 	for (int i = 1; i < argc; ++i) {
 		std::string_view current_arg{ argv[i] };
@@ -773,7 +776,7 @@ int main(int argc, const char **argv) {
 				PrintUsage(stderr);
 				return 1;
 			}
-			i += 1;
+			i += 1; // consume next arg
 
 			auto event_or_error = parse_event_string(*next_arg);
 			if (std::holds_alternative<error_t>(event_or_error)) {
@@ -781,7 +784,32 @@ int main(int argc, const char **argv) {
 				PrintUsage(stderr);
 				return 1;
 			}
-			generate_event = std::get<decltype(generate_event)>(event_or_error);
+			bool previous_option__use_pid_as_gid__discarded =
+					event_info.has_value() && event_info->use_pid_as_group_id;
+
+			auto opt_event = std::get<std::optional<ConsoleCtrlEvent>>(event_or_error);
+			if (opt_event.has_value()) {
+				event_info = generate_event_info{ .event = *opt_event };
+			}
+			else {
+				event_info.reset();
+			}
+			
+			auto after_next_index = i + 1;
+			bool after_next_available = after_next_index < argc;
+			if (after_next_available && std::string_view{ argv[after_next_index] } == "--use-pid-as-gid") {
+				i += 1; // consume after next arg
+				if (event_info.has_value()) {
+					event_info->use_pid_as_group_id = true;
+				}
+				else {
+					fmt::print(stderr, "Warning: Option {}--use-pid-as-gid{} ignored, because there is no event to generate.\n", quote_open, quote_close);
+				}
+			}
+			else if (previous_option__use_pid_as_gid__discarded) {
+				fmt::print(stderr, "Warning: previous option {0}--use-pid-as-gid{1} ignored, because it's not specefied directly after the <event> {0}{2}{1}.\n", quote_open, quote_close, *next_arg);
+			}
+			
 		}
 		else {
 			fmt::print(stderr, "Argument {}{}{} could not be interpreted\n", quote_open, current_arg, quote_close);
@@ -821,23 +849,39 @@ int main(int argc, const char **argv) {
 		
 	}
 
-
+	bool success = true;
+	auto update_success = [&] (bool new_success){
+		success = new_success && success;
+	};
 	if (PID.has_value()) {
 		if (no_self_spawn) {
-			if (!AttachToConsoleAndPrintInfo(fOut, *PID, change_mode, generate_event))
+			update_success(AttachToConsole(fOut, *PID, change_mode));
+			if (!success)
 				return 1;
 		}
 		else {
-			if (!SpawnSelf(fOut,fErr,*PID, change_mode, generate_event))
-				return 1;
+			update_success(SpawnSelf(fOut, fErr, *PID, change_mode, event_info));
+			return success ? 0 : 1;
 		}
 	}
-	else {
-		if(!PrintInfo(fOut, change_mode))
-			return 1;
+
+	update_success(PrintInfo(fOut, change_mode));
+
+	if (event_info.has_value()) {
+		fmt::print(fOut, "\n");
+		std::optional<DWORD> pid_opt{};
+		if (event_info->use_pid_as_group_id) {
+			if (PID.has_value())
+				pid_opt.emplace(static_cast<DWORD>(*PID));
+			else {
+				fmt::print(fOut, "Warning: Cannot use PID as process group ID (PGID), because no PID is specified\n");
+			}
+
+		}
+		update_success(GenerateCtrlEvent(fOut, event_info->event, pid_opt));
 	}
 
-	return 0;
+	return success ? 0 : 1;
 }
 
 int main_temp() {
