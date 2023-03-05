@@ -16,5 +16,15 @@
       <AdditionalManifestFiles>$(MSBuildThisFileDirectory)UTF8Manifest.xml %(AdditionalManifestFiles)</AdditionalManifestFiles>
     </Manifest>
   </ItemDefinitionGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <RuntimeLibrary
+        Condition="'$(Configuration)'=='Debug'"
+        >MultiThreadedDebug</RuntimeLibrary>
+      <RuntimeLibrary
+        Condition="'$(Configuration)'=='Release'"
+        >MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <ItemGroup />
 </Project>
