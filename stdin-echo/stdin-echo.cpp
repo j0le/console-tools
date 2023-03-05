@@ -161,6 +161,7 @@ int main()
 			if (not WriteFile(hOut, str.data(), str.size(), &dummy, nullptr))
 			{
 				fmt::print(stderr, "WriteFile() failed.\n");
+				return false;
 			}
 			//fmt::print(stdout, "{}", str);
 			//std::fflush(stdout);
@@ -237,4 +238,5 @@ int main()
 
 
 	} while (true);
+	return 0;
 }
