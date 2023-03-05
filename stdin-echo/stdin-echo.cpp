@@ -45,15 +45,17 @@ BOOL WINAPI HandleCtrlEvent(
 }
 
 enum class e_replace_CR_with:uint32_t {
-	CR,
+	CR, // no replacment, everything stays as is
 	CRLF,
 	LF
 };
 
-constexpr const e_replace_CR_with replace_CR_with{ e_replace_CR_with::LF };
+constexpr const e_replace_CR_with replace_CR_with{ e_replace_CR_with::CR };
 
 int main()
 {
+	while (not IsDebuggerPresent());
+	DebugBreak();
 	_set_fmode(_O_BINARY);
 	_setmode(_fileno(stdout), _O_BINARY);
 	_setmode(_fileno(stderr), _O_BINARY);
@@ -90,6 +92,17 @@ int main()
 		fmt::print(stderr, "stdin is not a console.\n");
 		return 1;
 	}
+
+	DWORD dummy{};
+	bool is_stdout_console = GetConsoleMode(hOut, &dummy);
+
+	bool handler_set{ false };
+	if (!(handler_set = SetConsoleCtrlHandler(&HandleCtrlEvent, TRUE)))
+	{
+		fmt::print(stderr, "Error: SetConsoleCtrlHandler() failed.\n");
+		return 1;
+	}
+
 	struct restore_console_mode {
 		DWORD orig_console_mode{};
 		HANDLE console_handle{};
@@ -101,16 +114,6 @@ int main()
 	if (not SetConsoleMode(hIn, ENABLE_VIRTUAL_TERMINAL_INPUT))
 	{
 		fmt::print(stderr, "SetConsoleMode() failed for stdin.\n");
-		return 1;
-	}
-
-	DWORD dummy{};
-	bool is_stdout_console = GetConsoleMode(hOut, &dummy);
-
-	bool handler_set{ false };
-	if (!(handler_set = SetConsoleCtrlHandler(&HandleCtrlEvent, TRUE)))
-	{
-		fmt::print(stderr, "Error: SetConsoleCtrlHandler() failed.\n");
 		return 1;
 	}
 
