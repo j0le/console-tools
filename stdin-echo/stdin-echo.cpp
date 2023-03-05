@@ -28,43 +28,21 @@ static_assert(UTF_8_test_2[0] == static_cast<char>(0xC3u));
 static_assert(UTF_8_test_2[1] == static_cast<char>(0xBCu));
 static_assert(UTF_8_test_2[2] == static_cast<char>(0x0u));
 
-struct handle_wrapper {
-	HANDLE handle{ nullptr };
-	handle_wrapper() = default;
-	explicit handle_wrapper(HANDLE h) : handle{ h } {}
-	handle_wrapper(const handle_wrapper&) = delete;
-	handle_wrapper& operator=(const handle_wrapper&) = delete;
 
-	handle_wrapper(handle_wrapper&& other) noexcept
-		: handle{ other.handle }
-	{
-		other.handle = nullptr;
-	}
-	handle_wrapper& operator=(handle_wrapper&& other) = delete;
+bool g_ctrl_event_handled{ false };
 
-	bool try_move(handle_wrapper&& other) {
-		if (IsNullOrInvalid()) {
-			handle = other.handle;
-			other.handle = nullptr;
-			return true;
-		}
-		return false;
+BOOL WINAPI HandleCtrlEvent(
+	_In_ DWORD dwCtrlType
+) {
+	switch (dwCtrlType) {
+	case CTRL_C_EVENT:
+	case CTRL_BREAK_EVENT:
+		g_ctrl_event_handled = true;
+		return TRUE;
+	default:
+		return FALSE;
 	}
-	~handle_wrapper() {
-		Close();
-	}
-	bool Close() {
-		if (!IsNullOrInvalid()) {
-			bool ret = CloseHandle(handle);
-			handle = nullptr;
-		}
-		return true;
-	}
-
-	bool IsNullOrInvalid() {
-		return handle == nullptr || handle == INVALID_HANDLE_VALUE;
-	}
-};
+}
 
 int main()
 {
@@ -89,41 +67,57 @@ int main()
 		return 1;
 	}
 
-	handle_wrapper hIn{ GetStdHandle(STD_INPUT_HANDLE) };
-	handle_wrapper hOut{ GetStdHandle(STD_OUTPUT_HANDLE) };
+	HANDLE hIn{ GetStdHandle(STD_INPUT_HANDLE) };
+	HANDLE hOut{ GetStdHandle(STD_OUTPUT_HANDLE) };
 
-	if (hIn.IsNullOrInvalid() || hOut.IsNullOrInvalid())
+	if (hIn == nullptr || hIn == INVALID_HANDLE_VALUE || hOut == nullptr || hOut == INVALID_HANDLE_VALUE)
 	{
 		fmt::print(stderr, "couldn't get standard input/output handles.\n");
 		return 1;
 	}
 	DWORD dummy{};
-	if (not GetConsoleMode(hIn.handle, &dummy)) {
+	if (not GetConsoleMode(hIn, &dummy)) {
 		fmt::print(stderr, "stdin is not a console.\n");
 		return 1;
 	}
+	bool is_stdout_console = GetConsoleMode(hOut, &dummy);
 
-
+	bool handler_set{ false };
+	if (!(handler_set = SetConsoleCtrlHandler(&HandleCtrlEvent, TRUE)))
+	{
+		fmt::print(stderr, "Error: SetConsoleCtrlHandler() failed.\n");
+		return 1;
+	}
 
 	static constexpr const size_t BUFF_SIZE{ 512 };
 	wchar_t buffer[BUFF_SIZE]{};
 
 	do {
+		if (g_ctrl_event_handled) {
+			fmt::print(stderr, "Control-C\n");
+			return 1;
+		}
 		DWORD dwWideCharactersRead{};
 		bool bRead{ false };
-		bRead = ReadConsoleW(hIn.handle,buffer, BUFF_SIZE, &dwWideCharactersRead, nullptr);
+		bRead = ReadConsoleW(hIn, buffer, BUFF_SIZE, &dwWideCharactersRead, nullptr);
 		if (!bRead) {
 			fmt::print(stderr, "ReadConsoleW() failed.\n");
 			return 1;
 		}
-		if (dwWideCharactersRead == 0)
+		if (dwWideCharactersRead == 0) {
+			fmt::print(stderr, "nothing to read anymore.\n");
 			break;
+		}
 		if (dwWideCharactersRead > BUFF_SIZE) {
 			fmt::print(stderr, "Unexpected error when using ReadConsoleW().\n");
 			return 1;
 		}
+		if (g_ctrl_event_handled) {
+			fmt::print(stderr, "Control-C\n");
+			return 1;
+		}
 
-		if (GetConsoleMode(hOut.handle, &dummy)) {
+		if (is_stdout_console) {
 			// StdOut is a console
 			bool success{ false };
 			DWORD absolute_number_of_wide_characters_written{ 0 };
@@ -134,7 +128,7 @@ int main()
 				&&
 				(
 					success = WriteConsoleW(
-						hOut.handle,
+						hOut,
 						&buffer[absolute_number_of_wide_characters_written],
 						dwWideCharactersRead - absolute_number_of_wide_characters_written,
 						&number_of_wchars_written,
@@ -162,8 +156,10 @@ int main()
 		else {
 			// stdout is not a console
 			std::wstring_view sv(buffer, dwWideCharactersRead);
-			auto str = nowide::narrow(sv);
-			fmt::print(stdout, "{}", str);
+			const auto str = nowide::narrow(sv);
+			WriteFile(hOut, str.data(), str.size(), &dummy, nullptr);
+			//fmt::print(stdout, "{}", str);
+			//std::fflush(stdout);
 		}
 
 	} while (true);
