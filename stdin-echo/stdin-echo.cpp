@@ -158,7 +158,10 @@ int main()
 		else {
 			// stdout is not a console
 			const auto str = nowide::narrow(sv);
-			WriteFile(hOut, str.data(), str.size(), &dummy, nullptr);
+			if (not WriteFile(hOut, str.data(), str.size(), &dummy, nullptr))
+			{
+				fmt::print(stderr, "WriteFile() failed.\n");
+			}
 			//fmt::print(stdout, "{}", str);
 			//std::fflush(stdout);
 		}
