@@ -9,6 +9,12 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "pipe_to_con", "pipe_to_con\
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "stdin-echo", "stdin-echo\stdin-echo.vcxproj", "{B6A05CD1-7C4C-411F-B89C-683C078A44BB}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{989A7255-BA8F-4043-AB37-EFC6246D7C0A}"
+	ProjectSection(SolutionItems) = preProject
+		console-tools.props = console-tools.props
+		UTF8Manifest.xml = UTF8Manifest.xml
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64

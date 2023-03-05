@@ -23,9 +23,6 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <Xml Include="UTF8Manifest.xml" />
-  </ItemGroup>
-  <ItemGroup>
     <ClInclude Include="helper.h">
       <Filter>Header Files</Filter>
     </ClInclude>
