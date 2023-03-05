@@ -7,6 +7,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "stty", "stty\stty.vcxproj",
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "pipe_to_con", "pipe_to_con\pipe_to_con.vcxproj", "{DD078802-1E07-4E82-8A1A-600EC084786B}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "stdin-echo", "stdin-echo\stdin-echo.vcxproj", "{B6A05CD1-7C4C-411F-B89C-683C078A44BB}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -31,6 +33,14 @@ Global
 		{DD078802-1E07-4E82-8A1A-600EC084786B}.Release|x64.Build.0 = Release|x64
 		{DD078802-1E07-4E82-8A1A-600EC084786B}.Release|x86.ActiveCfg = Release|Win32
 		{DD078802-1E07-4E82-8A1A-600EC084786B}.Release|x86.Build.0 = Release|Win32
+		{B6A05CD1-7C4C-411F-B89C-683C078A44BB}.Debug|x64.ActiveCfg = Debug|x64
+		{B6A05CD1-7C4C-411F-B89C-683C078A44BB}.Debug|x64.Build.0 = Debug|x64
+		{B6A05CD1-7C4C-411F-B89C-683C078A44BB}.Debug|x86.ActiveCfg = Debug|Win32
+		{B6A05CD1-7C4C-411F-B89C-683C078A44BB}.Debug|x86.Build.0 = Debug|Win32
+		{B6A05CD1-7C4C-411F-B89C-683C078A44BB}.Release|x64.ActiveCfg = Release|x64
+		{B6A05CD1-7C4C-411F-B89C-683C078A44BB}.Release|x64.Build.0 = Release|x64
+		{B6A05CD1-7C4C-411F-B89C-683C078A44BB}.Release|x86.ActiveCfg = Release|Win32
+		{B6A05CD1-7C4C-411F-B89C-683C078A44BB}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
