@@ -197,3 +197,9 @@ std::optional<set_and_reset<T>> parse_set_and_reset_string(std::string_view str)
 error_or<std::optional<ConsoleCtrlEvent>> parse_event_string(std::string_view event_name);
 
 std::string event_to_string(std::optional<ConsoleCtrlEvent> event);
+
+std::optional<std::string> GetProgPath(FILE* streamErr);
+
+std::optional<std::string> get_error_message(DWORD error_code);
+
+std::string indent_message(const std::string_view& spaces, const std::string& str);
