@@ -34,92 +34,113 @@ bool ReadPipeWriteConsole(HANDLE hPipe)
 	alignas(wchar_t) char szBuffer[BUFF_SIZE]{};
 	constexpr const auto element_size{ sizeof(szBuffer[0]) };
 	static_assert(element_size == 1);
+	bool success_ret = true;
 
 
-	HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+	HANDLE hStdOut = nullptr;
+	hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
 	if (hStdOut == INVALID_HANDLE_VALUE || hStdOut == nullptr)
 	{
 		fmt::print(stderr, "GetStdHandle(STD_OUTPUT_HANDLE) failed with {:#x}\n", GetLastError());
-		return false;
+		hStdOut = nullptr;
+		success_ret = false;
+		goto cleanup;
 	}
 
 	{
 		DWORD dummy;
 		if (!GetConsoleMode(hStdOut, &dummy)) {
 			fmt::print(stderr, "stdout is not a console\n");
-			return false;
+			success_ret = false;
+			goto cleanup;
 		}
 	}
 
-	DWORD dwBytesRead{};
-	size_t bytesWritten{};
-	bool bRead{ false };
-	const char* end_ptr = (&szBuffer[0])+BUFF_SIZE;
-	static_assert(sizeof(wchar_t)==2);
-	char* start_ptr = &szBuffer[sizeof(wchar_t)];
+	{
+		char* const read_end_ptr = (&szBuffer[0]) + BUFF_SIZE;
+		static_assert(sizeof(wchar_t) == 2);
 
-	do {
-		bRead = ReadFile(hPipe, start_ptr, (end_ptr - start_ptr), &dwBytesRead, nullptr);
-		if (!bRead)
-			break;
-		if (dwBytesRead == 0)
-			break;
-		if (dwBytesRead > (end_ptr - start_ptr)) {
-			fmt::print(stderr, "Unexpected error when using ReadFile().\n");
-			goto cleanup;
-		}
+		// read_start_ptr is either:
+		// - odd: `&szBuffer[1]`
+		// - even: `&szBuffer[2]`
+		char* read_start_ptr = &szBuffer[sizeof(wchar_t)]; // we begin with even.
+		// If read_start_ptr is odd, than we have one byte more from the last round in `szBuffer[0]`.
+		// So it is reasonable to begin with even, because in the beginning we don't have a byte from the last round.
 
-		const bool start_ptr_odd = (std::bit_cast<uintptr_t>(start_ptr) % 2) != 0;
-		const DWORD number_of_bytes_available = dwBytesRead + (start_ptr_odd ? 2 : 0);
-		const bool available_odd = (number_of_bytes_available % 2) != 0;
-		
-		{
-			const DWORD absolute_number_of_chars_to_write = number_of_bytes_available / sizeof(wchar_t);
-			const char * write_start_ptr = start_ptr_odd ? &szBuffer[0] : &szBuffer[sizeof(wchar_t)];
-			DWORD absolute_number_of_chars_written = 0;
-			DWORD number_of_chars_written = 0;
-			bool success = true;
-			while
-			(
-				absolute_number_of_chars_written < absolute_number_of_chars_to_write
-				&&
+		do {
+			DWORD dwBytesRead{};
+			bool bRead = ReadFile(hPipe, read_start_ptr, (read_end_ptr - read_start_ptr), &dwBytesRead, nullptr);
+			if (!bRead)
+				break;
+			if (dwBytesRead == 0)
+				break;
+			if (dwBytesRead > (read_end_ptr - read_start_ptr)) {
+				fmt::print(stderr, "Unexpected error when using ReadFile(): More bytes read than requested.\n");
+				success_ret = false;
+				goto cleanup;
+			}
+
+			// Do have an extra byte from the last round? (Yes, if odd).
+			const bool read_start_ptr_odd = (std::bit_cast<uintptr_t>(read_start_ptr) % 2) != 0; 
+
+			// Add +1, if we have an additonal byte from the last round
+			const DWORD number_of_bytes_available = dwBytesRead + (read_start_ptr_odd ? 1 : 0);
+			const bool available_odd = (number_of_bytes_available % 2) != 0;
+
+			
+			const DWORD absolute_number_of_wchars_to_write = number_of_bytes_available / sizeof(wchar_t); // round down
+			const char* write_start_ptr = read_start_ptr_odd ? (read_start_ptr-1) : read_start_ptr; // must be even. So subtract 1, to make it even.
+			DWORD absolute_number_of_wchars_written = 0;
+			DWORD number_of_wchars_written = 0;
+			bool success_write = true;
+			if (absolute_number_of_wchars_to_write > 0)
+			{
+				while
+					(
+						absolute_number_of_wchars_written < absolute_number_of_wchars_to_write
+						&&
+						(
+							success_write = ::WriteConsoleW(
+								/* _In_             HANDLE  hConsoleOutput,         */ hStdOut,
+								/* _In_       const VOID * lpBuffer,                */ write_start_ptr + (absolute_number_of_wchars_written * sizeof(wchar_t)),
+								/* _In_             DWORD   nNumberOfCharsToWrite,  */ absolute_number_of_wchars_to_write - absolute_number_of_wchars_written,
+								/* _Out_opt_        LPDWORD lpNumberOfCharsWritten, */ &number_of_wchars_written,
+								/* _Reserved_       LPVOID  lpReserved              */ nullptr
+							)
+							)
+						&&
+						number_of_wchars_written > 0
+						) {
+					absolute_number_of_wchars_written += number_of_wchars_written;
+				}
+			}
+
+			if
 				(
-					success = ::WriteConsoleW(
-					/* _In_             HANDLE  hConsoleOutput,         */ hStdOut,
-					/* _In_       const VOID * lpBuffer,                */ write_start_ptr + (absolute_number_of_chars_written * sizeof(wchar_t),
-					/* _In_             DWORD   nNumberOfCharsToWrite,  */ absolute_number_of_chars_to_write - absolute_number_of_chars_written,
-					/* _Out_opt_        LPDWORD lpNumberOfCharsWritten, */ &number_of_chars_written,
-					/* _Reserved_       LPVOID  lpReserved              */ nullptr
-					)
-				)
-				&&
-				number_of_chars_written > 0
-			){
-				absolute_number_of_chars_written += number_of_chars_written;
+					!success_write
+					||
+					absolute_number_of_wchars_written != absolute_number_of_wchars_to_write
+				) {
+				success_ret = false;
+				goto cleanup;
 			}
 			
-			if
-			(
-				!success
-				||
-				absolute_number_of_chars_written != absolute_number_of_chars_to_write
-			){
-				return ;
+			// If the number of availble bytes is odd, than one byte couldn't be written, 
+			// because we can only write an even number of bytes, because the size of wchar_t is 2 bytes.
+			if (available_odd) {
+				szBuffer[0] = *(read_start_ptr + dwBytesRead - 1);
+				read_start_ptr = &szBuffer[1]; // make the read_start_ptr odd, to signal that we have one byte more
 			}
-		}
+			else {
+				read_start_ptr = &szBuffer[sizeof(wchar_t)];
+			}
 
-		if (available_odd) {
-			szBuffer[0] = start_ptr + dwBytesRead - 1;
-			start_ptr = &szBuffer[1];
-		}
-		else{
-			start_ptr = &szBuffer[sizeof(wchar_t)];
-		}
+		} while (true);
+	}
+cleanup:
+	// hStdOut does not have to be closed
 
-	} while (true);
-
-
-	return true;
+	return success_ret;
 }
 bool ReadConsoleWritePipe(HANDLE hPipe)
 {
