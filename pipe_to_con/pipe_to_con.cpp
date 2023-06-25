@@ -321,9 +321,17 @@ cleanup:
 		
 	return ret_value;
 }
+
+
+void PrintUsage(FILE* stream) {
+	fmt::print(stream,
+		"Usage:\n"
+		"  pipe-to-con [--pid <PID>] {--to-secondary|--from-secondary} [--secondary]\n"
+	);
 }
 
-int main()
+
+int main(int argc, const char *argv[])
 {
 	_set_fmode(_O_BINARY);
 	_setmode(_fileno(stdout), _O_BINARY);
@@ -353,7 +361,33 @@ int main()
 	bool secondary{ false };
 
 
-	// TODO: parse options
+	for (int i = 1; i < argc; ++i) {
+		std::string_view current_arg{ argv[i] };
+		std::optional<std::string_view> next_arg{ std::nullopt };
+
+		{
+			int next_index = i + 1;
+			bool next_available = next_index < argc;
+			if (next_available)
+				next_arg = argv[next_index];
+		}
+
+		auto check_next_arg = [&](std::string_view option_name) -> bool {
+			if (!next_arg) {
+				fmt::print(stderr, "Value for option '{}' is missing.\n", option_name);
+				PrintUsage(stderr);
+				return false;
+			}
+			i += 1;
+		};
+
+		if (current_arg == "--pid") {
+			if (!check_next_arg("--pid"))
+				return 1;
+
+			PID = string_to_uint<uint32_t>(*next_arg);
+		}
+	}
 
 	if (!PID.has_value()) {
 		fmt::print(stderr,
