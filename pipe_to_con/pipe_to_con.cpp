@@ -2,6 +2,7 @@
 #include <io.h>
 #include <fcntl.h>
 #include <optional>
+#include <cassert>
 
 #include <fmt/core.h>
 
@@ -81,15 +82,16 @@ bool ReadPipeWriteConsole(HANDLE hPipe)
 			}
 
 			// Do have an extra byte from the last round? (Yes, if odd).
-			const bool read_start_ptr_odd = (std::bit_cast<uintptr_t>(read_start_ptr) % 2) != 0; 
+			const bool read_start_ptr_odd = (std::bit_cast<uintptr_t>(read_start_ptr) % 2) != 0;
 
 			// Add +1, if we have an additonal byte from the last round
 			const DWORD number_of_bytes_available = dwBytesRead + (read_start_ptr_odd ? 1 : 0);
 			const bool available_odd = (number_of_bytes_available % 2) != 0;
 
-			
+
 			const DWORD absolute_number_of_wchars_to_write = number_of_bytes_available / sizeof(wchar_t); // round down
-			const char* write_start_ptr = read_start_ptr_odd ? (read_start_ptr-1) : read_start_ptr; // must be even. So subtract 1, to make it even.
+			const char* write_start_ptr = read_start_ptr_odd ? (read_start_ptr - 1) : read_start_ptr; // must be even. So subtract 1, to make it even.
+			assert(write_start_ptr == &szBuffer[0] || write_start_ptr == &szBuffer[2]);
 			DWORD absolute_number_of_wchars_written = 0;
 			DWORD number_of_wchars_written = 0;
 			bool success_write = true;
