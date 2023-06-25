@@ -2,7 +2,9 @@
 #include <io.h>
 #include <fcntl.h>
 #include <optional>
+#include <memory>
 #include <cassert>
+#include <console-tools/helper.h>
 
 #include <fmt/core.h>
 
@@ -173,14 +175,15 @@ bool ReadConsoleWritePipe(HANDLE hPipe)
 	bool bRead{ false };
 
 	do {
-		bRead = ReadConsoleW(hStdIn, szBuffer, BUFF_SIZE, &dwWideCharsRead, nullptr);
+		bRead = ReadConsoleW(hStdIn, szBuffer, BUFF_SIZE/sizeof(wchar_t), &dwWideCharsRead, nullptr);
 		if (!bRead)
 			break;
 		if (dwWideCharsRead == 0)
 			break;
 		if (dwWideCharsRead*sizeof(wchar_t) > BUFF_SIZE) {
 			fmt::print(stderr, "Unexpected error when using ReadConsoleW().\n");
-			goto cleanup;
+			//goto cleanup;
+			return false;
 		}
 
 		{
@@ -222,10 +225,33 @@ bool ReadConsoleWritePipe(HANDLE hPipe)
 	return true;
 }
 
+bool ReadOrWrite(HANDLE hPipe, bool bReadFromPipe) {
+	if (bReadFromPipe) {
+		return ReadPipeWriteConsole(hPipe);
+	}
+	else {
+		return ReadConsoleWritePipe(hPipe);
+	}
+}
 
-bool AttachToConsole(uint32_t pid, HANDLE in_or_out, bool handle_is_in);
-bool SpawnSelf(uint32_t pid, bool to_secondary)
-{
+
+bool AttachToConsole(uint32_t PID) {
+	if (!FreeConsole()) {
+		auto error = GetLastError();
+		auto message = get_error_message(error);
+		fmt::print(stderr, "FreeConsole() failed, but we are ignoring that. The error is {:#x} with message is {}{}{}\n",
+			error, quote_open, message.value_or(""), quote_close);
+	}
+	static_assert(sizeof(PID) == sizeof(DWORD) && std::is_unsigned_v<decltype(PID)> == std::is_unsigned_v<DWORD>);
+	if (!AttachConsole(PID)) {
+		auto error = GetLastError();
+		auto message = get_error_message(error);
+		fmt::print(stderr, "AttachConsole({}) failed with error {} - {}", PID, error, indent_message("  ", message.value_or("")));
+		return false;
+	}
+}
+
+bool SpawnSelf(uint32_t pid, bool to_secondary) {
 
 	bool ret_value = false;
 	DWORD exitCode{};
@@ -243,63 +269,63 @@ bool SpawnSelf(uint32_t pid, bool to_secondary)
 		fmt::print(stderr, "Failed to create pipe\n");
 		goto cleanup;
 	}
+
 	{
-		auto prog_path_opt = GetProgPath(fErr);
+		auto prog_path_opt = GetProgPath(stderr);
 		if (!prog_path_opt.has_value()) {
 			goto cleanup;
 		}
 		prog_path = *prog_path_opt;
 	}
 
-	HANDLE& handle_for_secondary = to_secondary ? h_read  : h_write;
-	HANDLE& handle_for_us        = to_secondary ? h_write : h_read;
+	{
+		HANDLE& handle_for_secondary = to_secondary ? h_read : h_write;
+		HANDLE& handle_for_us = to_secondary ? h_write : h_read;
 
-	startupinfo.cb = sizeof(startupinfo);
+		startupinfo.cb = sizeof(startupinfo);
 
-	//startupinfo.hStdError  = GetStdHandle(STD_ERROR_HANDLE);
-	//startupinfo.hStdOutput = INVALID_HANDLE_VALUE;
-	//startupinfo.hStdInput  = INVALID_HANDLE_VALUE;
-	//startupinfo.dwFlags   |= STARTF_USESTDHANDLES;
-	cmd_line = fmt::format("\"{}\" --pid {} --handle {} --secondary --{}-secondary ",
-		prog_path, pid, std::bit_cast<uintptr_t>(handle_for_secondary),
-		(to_secondary ? "to" : "from")
+		//startupinfo.hStdError  = GetStdHandle(STD_ERROR_HANDLE);
+		//startupinfo.hStdOutput = INVALID_HANDLE_VALUE;
+		//startupinfo.hStdInput  = INVALID_HANDLE_VALUE;
+		//startupinfo.dwFlags   |= STARTF_USESTDHANDLES;
+		cmd_line = fmt::format("\"{}\" --pid {} --handle {} --secondary --{}-secondary ",
+			prog_path, pid, std::bit_cast<uintptr_t>(handle_for_secondary),
+			(to_secondary ? "to" : "from")
 		);
 
-	mutable_cmd_line_buf = std::make_unique<char[]>(cmd_line.length() + 1);
-	std::memcpy(mutable_cmd_line_buf.get(), cmd_line.c_str(), cmd_line.length() * sizeof(char));
-	mutable_cmd_line_buf.get()[cmd_line.length()] = '\0';
+		mutable_cmd_line_buf = std::make_unique<char[]>(cmd_line.length() + 1);
+		std::memcpy(mutable_cmd_line_buf.get(), cmd_line.c_str(), cmd_line.length() * sizeof(char));
+		mutable_cmd_line_buf.get()[cmd_line.length()] = '\0';
 
 
-	if (!CreateProcessA(prog_path.c_str(), mutable_cmd_line_buf.get(), nullptr, nullptr, true, 0, nullptr, nullptr, &startupinfo, &procinfo)) {
-		auto error = GetLastError();
-		fmt::print(stderr, "Couldn't create child process - {:#x} {}\n", error, get_error_message(error).value_or(""));
-		goto cleanup;
+		if (!CreateProcessA(prog_path.c_str(), mutable_cmd_line_buf.get(), nullptr, nullptr, true, 0, nullptr, nullptr, &startupinfo, &procinfo)) {
+			auto error = GetLastError();
+			fmt::print(stderr, "Couldn't create child process - {:#x} {}\n", error, get_error_message(error).value_or(""));
+			goto cleanup;
+		}
+		CloseHandle(procinfo.hThread);
+		procinfo.hThread = nullptr;
+
+		CloseHandle(handle_for_secondary);
+		handle_for_secondary = nullptr;
+
+		bool rw_result = ReadOrWrite(handle_for_us, !to_secondary);
+
+		WaitForSingleObject(procinfo.hProcess, INFINITE);
+
+		if (0 == GetExitCodeProcess(procinfo.hProcess, &exitCode)) {
+			fmt::print(stderr, "Failed to get Exit Code of Process.\n");
+			goto cleanup;
+		}
+
+		if (exitCode != 0) {
+			fmt::print(stderr, "Child process failed with exited code: {}", exitCode);
+			goto cleanup;
+		}
+
+		//hPipeListenerThread = reinterpret_cast<HANDLE>(_beginthread(PipeListener, 0, hPipeIn));
+		ret_value = rw_result;
 	}
-	CloseHandle(procinfo.hThread);
-	procinfo.hThread = nullptr;
-
-	CloseHandle(handle_for_secondary);
-	handle_for_secondary = nullptr;
-
-	{
-		// TODO: read or write
-	}
-
-
-	WaitForSingleObject(procinfo.hProcess, INFINITE);
-
-	if (0 == GetExitCodeProcess(procinfo.hProcess, &exitCode)) {
-		fmt::print(fErr, "Failed to get Exit Code of Process.\n");
-		goto cleanup;
-	}
-
-	if (exitCode != 0) {
-		fmt::print(fErr, "Child process failed with exited code: {}", exitCode);
-		goto cleanup;
-	}
-
-	//hPipeListenerThread = reinterpret_cast<HANDLE>(_beginthread(PipeListener, 0, hPipeIn));
-	ret_value = true;
 cleanup:
 	if (procinfo.hProcess != nullptr) {
 		CloseHandle(procinfo.hProcess);
@@ -310,13 +336,13 @@ cleanup:
 		procinfo.hThread = nullptr;
 	}
 
-	if (hChildStdOut_read) {
-		CloseHandle(hChildStdOut_read);
-		hChildStdOut_read = nullptr;
+	if (h_read) {
+		CloseHandle(h_read);
+		h_read = nullptr;
 	}
-	if (hChildStdOut_write) {
-		CloseHandle(hChildStdOut_write);
-		hChildStdOut_write = nullptr;
+	if (h_write) {
+		CloseHandle(h_write);
+		h_write = nullptr;
 	}
 		
 	return ret_value;
@@ -326,7 +352,7 @@ cleanup:
 void PrintUsage(FILE* stream) {
 	fmt::print(stream,
 		"Usage:\n"
-		"  pipe-to-con [--pid <PID>] {--to-secondary|--from-secondary} [--secondary]\n"
+		"  pipe-to-con [--pid <PID>] {{--to-secondary|--from-secondary}} [--secondary]\n"
 	);
 }
 
@@ -379,6 +405,7 @@ int main(int argc, const char *argv[])
 				return false;
 			}
 			i += 1;
+			return true;
 		};
 
 		if (current_arg == "--pid") {
@@ -386,6 +413,36 @@ int main(int argc, const char *argv[])
 				return 1;
 
 			PID = string_to_uint<uint32_t>(*next_arg);
+			if (!PID) {
+				fmt::print(stderr, "Process identifier supplied for option \"--pid\" is not a number in base ten.\n");
+				PrintUsage(stderr);
+				return 1;
+			}
+		}
+		else if (current_arg == "--to-secondary") {
+			to_secondary = true;
+		}
+		else if (current_arg == "--from-secondary") {
+			from_secondary = true;
+		}
+		else if (current_arg == "--secondary") {
+			secondary = true;
+		}
+		else if (current_arg == "--handle") {
+			if (!check_next_arg("--handle"))
+				return 1;
+			auto opt_uint = string_to_uint<uintptr_t>(*next_arg);
+			if (!opt_uint) {
+				fmt::print(stderr, "value for option \"--handle\" is not a number or not in range.\n");
+				PrintUsage(stderr);
+				return 1;
+			}
+			handle_in_or_out = std::bit_cast<intptr_t>(opt_uint.value());
+		}
+		else {
+			fmt::print(stderr, "Argument {}{}{} could not be interpreted\n", quote_open, current_arg, quote_close);
+			PrintUsage(stderr);
+			return 1;
 		}
 	}
 
@@ -417,12 +474,15 @@ int main(int argc, const char *argv[])
 		const intptr_t handle_intptr = handle_in_or_out.value();
 		const HANDLE handle = std::bit_cast<HANDLE>(handle_intptr);
 		const bool is_handle_input = to_secondary;
-		if(!AttachToConsole(PID.value(), handle, is_handle_input)) {
+		if(!AttachToConsole(PID.value())) {
+			return 1;
+		}
+		if (!ReadOrWrite(handle, is_handle_input)) {
 			return 1;
 		}
 		return 0;
 	}else{
-		if(!handle_in_or_out.has_value()) {
+		if(handle_in_or_out.has_value()) {
 			fmt::print(stderr,
 					"Error: You must not specify a handle value, for the primary process.\n");
 			return 1;
