@@ -11,7 +11,7 @@
 #include <io.h>
 #include <fcntl.h>
 
-#include "helper.h"
+#include "console-tools/helper.h"
 
 #include <fmt/core.h>
 #include <nowide/args.hpp>

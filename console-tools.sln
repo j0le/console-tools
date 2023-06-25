@@ -15,6 +15,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		UTF8Manifest.xml = UTF8Manifest.xml
 	EndProjectSection
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "shared", "shared\shared.vcxitems", "{A7331950-69BE-4A95-B55D-E37869A94FB8}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -53,5 +55,11 @@ Global
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {CB131D98-E59F-40C9-B9E6-A034BBDEB904}
+	EndGlobalSection
+	GlobalSection(SharedMSBuildProjectFiles) = preSolution
+		shared\shared.vcxitems*{4f138457-1141-486d-a75b-1f2c0bf50ac5}*SharedItemsImports = 4
+		shared\shared.vcxitems*{a7331950-69be-4a95-b55d-e37869a94fb8}*SharedItemsImports = 9
+		shared\shared.vcxitems*{b6a05cd1-7c4c-411f-b89c-683c078a44bb}*SharedItemsImports = 4
+		shared\shared.vcxitems*{dd078802-1e07-4e82-8a1a-600ec084786b}*SharedItemsImports = 4
 	EndGlobalSection
 EndGlobal

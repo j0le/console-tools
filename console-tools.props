@@ -11,6 +11,7 @@
       <PreprocessorDefinitions>NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+	  <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories);$(MsBuildThisFileDirectory)\include</AdditionalIncludeDirectories>
     </ClCompile>
     <Manifest>
       <AdditionalManifestFiles>$(MSBuildThisFileDirectory)UTF8Manifest.xml %(AdditionalManifestFiles)</AdditionalManifestFiles>
