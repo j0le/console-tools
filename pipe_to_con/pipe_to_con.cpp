@@ -5,6 +5,8 @@
 #include <memory>
 #include <cassert>
 #include <console-tools/helper.h>
+#include <thread>
+#include <chrono>
 
 #include <fmt/core.h>
 
@@ -225,12 +227,110 @@ bool ReadConsoleWritePipe(HANDLE hPipe)
 	return true;
 }
 
-bool ReadOrWrite(HANDLE hPipe, bool bReadFromPipe) {
+bool ReadHandleWriteFileByteWise(HANDLE hIn, FILE* fOut) {
+	
+	constexpr const DWORD BUFF_SIZE{ 512 };
+	char szBuffer[BUFF_SIZE]{};
+	constexpr const auto element_size{ sizeof(szBuffer[0]) };
+	static_assert(element_size == 1);
+
+	DWORD dwBytesRead{};
+	size_t bytesWritten{};
+	bool bRead{ false };
+
+	do {
+		bRead = ReadFile(hIn, szBuffer, BUFF_SIZE, &dwBytesRead, nullptr);
+		if (!bRead)
+			break;
+		if (dwBytesRead == 0)
+			break;
+		if (dwBytesRead > BUFF_SIZE) {
+			fmt::print(stderr, "Unexpected error when using ReadFile().\n");
+			return false;
+		}
+
+		std::string_view sv(szBuffer, dwBytesRead);
+		fmt::print(fOut, "{}", sv); // this can also print zero bytes ('\0' ASCII NUL)
+	} while (true);
+	
+	return true;
+}
+
+std::optional<FILE*> HandleToFilePtr(HANDLE handle, const char* mode) {
+	int fd = _open_osfhandle(reinterpret_cast<intptr_t>(handle), 0);
+	if (fd == -1)
+		return std::nullopt;
+	FILE* file = _fdopen(fd, mode);
+	if (file == nullptr)
+		return std::nullopt;
+	return file;
+}
+
+bool ReadStdInWritePipeUTF8(HANDLE& hPipe) {
+	HANDLE hStdIn = GetStdHandle(STD_INPUT_HANDLE);
+	if (hStdIn == INVALID_HANDLE_VALUE || hStdIn == nullptr)
+	{
+		fmt::print(stderr, "GetStdHandle(STD_INPUT_HANDLE) failed with {:#x}\n", GetLastError());
+		return false;
+	}
+
+	{
+		DWORD dummy;
+		if (GetConsoleMode(hStdIn, &dummy)) {
+			fmt::print(stderr, "stdin is a console\n");
+			return false;
+		}
+	}
+
+	auto fOut_opt = HandleToFilePtr(hPipe, "w");
+	if (!fOut_opt.has_value()) {
+		fmt::print(stderr, "cannot convert pipe handle to FILE*");
+		return false;
+	}
+	FILE* fOut = fOut_opt.value();
+	bool success = ReadHandleWriteFileByteWise(hStdIn, fOut_opt.value());
+cleanup:
+	// Close Pipe
+	if (0 != fclose(fOut)) {
+		return false;
+	}
+	hPipe = nullptr;
+	return success;
+}
+
+bool ReadPipeWriteStdOutUTF8(HANDLE hPipe) {
+
+	HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+	if (hStdOut == INVALID_HANDLE_VALUE || hStdOut == nullptr)
+	{
+		fmt::print(stderr, "GetStdHandle(STD_OUTPUT_HANDLE) failed with {:#x}\n", GetLastError());
+		return false;
+	}
+	auto fOut_opt = HandleToFilePtr(hStdOut, "r");
+	if (!fOut_opt.has_value()) {
+		fmt::print(stderr, "cannot convert pipe handle to FILE*");
+		return false;
+	}
+
+	return ReadHandleWriteFileByteWise(hPipe, fOut_opt.value());
+}
+
+bool ReadOrWrite(HANDLE& hPipe, bool bReadFromPipe, bool is_utf8) {
 	if (bReadFromPipe) {
-		return ReadPipeWriteConsole(hPipe);
+		if (is_utf8) {
+			return ReadPipeWriteStdOutUTF8(hPipe);
+		}
+		else {
+			return ReadPipeWriteConsole(hPipe);
+		}
 	}
 	else {
-		return ReadConsoleWritePipe(hPipe);
+		if (is_utf8) {
+			return ReadStdInWritePipeUTF8(hPipe);
+		}
+		else {
+			return ReadConsoleWritePipe(hPipe);
+		}
 	}
 }
 
@@ -251,7 +351,7 @@ bool AttachToConsole(uint32_t PID) {
 	}
 }
 
-bool SpawnSelf(uint32_t pid, bool to_secondary) {
+bool SpawnSelf(uint32_t pid, bool to_secondary, bool is_utf8) {
 
 	bool ret_value = false;
 	DWORD exitCode{};
@@ -282,15 +382,21 @@ bool SpawnSelf(uint32_t pid, bool to_secondary) {
 		HANDLE& handle_for_secondary = to_secondary ? h_read : h_write;
 		HANDLE& handle_for_us = to_secondary ? h_write : h_read;
 
+		if (!SetHandleInformation(handle_for_us, HANDLE_FLAG_INHERIT, 0)) {
+			fmt::println(stderr, "Failed to disable inheritance of a Handle");
+			goto cleanup;
+		}
+
 		startupinfo.cb = sizeof(startupinfo);
 
 		//startupinfo.hStdError  = GetStdHandle(STD_ERROR_HANDLE);
 		//startupinfo.hStdOutput = INVALID_HANDLE_VALUE;
 		//startupinfo.hStdInput  = INVALID_HANDLE_VALUE;
 		//startupinfo.dwFlags   |= STARTF_USESTDHANDLES;
-		cmd_line = fmt::format("\"{}\" --pid {} --handle {} --secondary --{}-secondary ",
+		cmd_line = fmt::format("\"{}\" --pid {} --handle {} --secondary --{}-secondary {}",
 			prog_path, pid, std::bit_cast<uintptr_t>(handle_for_secondary),
-			(to_secondary ? "to" : "from")
+			(to_secondary ? "to" : "from"),
+			(is_utf8 ? "--utf8":"")
 		);
 
 		mutable_cmd_line_buf = std::make_unique<char[]>(cmd_line.length() + 1);
@@ -309,7 +415,7 @@ bool SpawnSelf(uint32_t pid, bool to_secondary) {
 		CloseHandle(handle_for_secondary);
 		handle_for_secondary = nullptr;
 
-		bool rw_result = ReadOrWrite(handle_for_us, !to_secondary);
+		bool rw_result = ReadOrWrite(handle_for_us, !to_secondary, is_utf8);
 
 		WaitForSingleObject(procinfo.hProcess, INFINITE);
 
@@ -357,12 +463,21 @@ void PrintUsage(FILE* stream) {
 }
 
 
-int main(int argc, const char *argv[])
+int main(int argc, const char* argv[])
 {
 	_set_fmode(_O_BINARY);
 	_setmode(_fileno(stdout), _O_BINARY);
 	_setmode(_fileno(stderr), _O_BINARY);
 	_setmode(_fileno(stdin), _O_BINARY);
+
+	if(false){
+		fmt::println("wait for debugger debug break");
+		while (!IsDebuggerPresent()) {
+			using namespace std::chrono_literals;
+			std::this_thread::sleep_for(10ms);
+		}
+		DebugBreak();
+	}
 
 	if (GetACP() != 65001) {
 		fmt::print(stderr, "The Active Code Page (ACP) for this process is not UTF-8 (65001).\n"
@@ -385,6 +500,7 @@ int main(int argc, const char *argv[])
 	bool to_secondary { false };
 	bool from_secondary { false };
 	bool secondary{ false };
+	bool utf8{ false };
 
 
 	for (int i = 1; i < argc; ++i) {
@@ -427,6 +543,9 @@ int main(int argc, const char *argv[])
 		}
 		else if (current_arg == "--secondary") {
 			secondary = true;
+		}
+		else if (current_arg == "--utf8") {
+			utf8 = true;
 		}
 		else if (current_arg == "--handle") {
 			if (!check_next_arg("--handle"))
@@ -472,12 +591,12 @@ int main(int argc, const char *argv[])
 			return 1;
 		}
 		const intptr_t handle_intptr = handle_in_or_out.value();
-		const HANDLE handle = std::bit_cast<HANDLE>(handle_intptr);
+		HANDLE handle = std::bit_cast<HANDLE>(handle_intptr);
 		const bool is_handle_input = to_secondary;
 		if(!AttachToConsole(PID.value())) {
 			return 1;
 		}
-		if (!ReadOrWrite(handle, is_handle_input)) {
+		if (!ReadOrWrite(handle, is_handle_input, utf8)) {
 			return 1;
 		}
 		return 0;
@@ -487,7 +606,7 @@ int main(int argc, const char *argv[])
 					"Error: You must not specify a handle value, for the primary process.\n");
 			return 1;
 		}
-		if (!SpawnSelf(PID.value(), to_secondary)){
+		if (!SpawnSelf(PID.value(), to_secondary, utf8)){
 			return 1;
 		}
 		return 0;
